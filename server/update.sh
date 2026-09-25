@@ -434,7 +434,6 @@ for attempt in 1 2 3 4 5; do
     if curl \
         --fail \
         --silent \
-        --show-error \
         --max-time 5 \
         "${HEALTH_URL}" \
         >/dev/null
