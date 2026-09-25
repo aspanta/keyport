@@ -65,38 +65,26 @@ systemctl cat "${SERVICE}" >/dev/null 2>&1 \
 # Read database configuration.
 #
 
-DB_SOCKET=""
-DB_NAME=""
-DB_USER=""
-DB_PASSWORD=""
+read_config_value() {
+    local name="$1"
+    local line
 
-while IFS='=' read -r key value; do
-    case "${key}" in
-        DB_SOCKET)
-            DB_SOCKET="${value}"
-            ;;
-        DB_NAME)
-            DB_NAME="${value}"
-            ;;
-        DB_USER)
-            DB_USER="${value}"
-            ;;
-        DB_PASSWORD)
-            DB_PASSWORD="${value}"
-            ;;
-    esac
-done < "${CONFIG_FILE}"
+    line="$(grep -m1 "^${name}=" "${CONFIG_FILE}")" \
+        || return 1
 
-[[ -n "${DB_SOCKET}" ]] \
+    printf '%s' "${line#*=}"
+}
+
+DB_SOCKET="$(read_config_value DB_SOCKET)" \
     || die "DB_SOCKET is missing from ${CONFIG_FILE}"
 
-[[ -n "${DB_NAME}" ]] \
+DB_NAME="$(read_config_value DB_NAME)" \
     || die "DB_NAME is missing from ${CONFIG_FILE}"
 
-[[ -n "${DB_USER}" ]] \
+DB_USER="$(read_config_value DB_USER)" \
     || die "DB_USER is missing from ${CONFIG_FILE}"
 
-[[ -n "${DB_PASSWORD}" ]] \
+DB_PASSWORD="$(read_config_value DB_PASSWORD)" \
     || die "DB_PASSWORD is missing from ${CONFIG_FILE}"
 
 [[ "${DB_NAME}" =~ ^[A-Za-z0-9_]+$ ]] \
