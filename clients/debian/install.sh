@@ -97,14 +97,14 @@ chmod 0755 "${INSTALL_DIR}"
 install \
     -o root \
     -g root \
-    -m 0755 \
+    -m 0700 \
     "${CLIENT_SOURCE}" \
     "${CLIENT_FILE}"
 
 install \
     -o root \
     -g root \
-    -m 0755 \
+    -m 0700 \
     "${UPDATE_SOURCE}" \
     "${UPDATE_FILE}"
 

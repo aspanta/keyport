@@ -91,14 +91,14 @@ trap 'cleanup_new_files; cleanup' EXIT
 install \
     -o root \
     -g root \
-    -m 0755 \
+    -m 0700 \
     "${CLIENT_SOURCE}" \
     "${CLIENT_NEW}"
 
 install \
     -o root \
     -g root \
-    -m 0755 \
+    -m 0700 \
     "${UPDATE_SOURCE}" \
     "${UPDATE_NEW}"
 
