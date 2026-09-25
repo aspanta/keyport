@@ -1,0 +1,608 @@
+#!/usr/bin/env python3
+
+import argparse
+import base64
+import binascii
+import json
+import os
+import re
+import secrets
+import string
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+CONFIG_FILE = "/opt/keyport-client/keyport-client.conf"
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+CREATE_DEFAULT_LENGTH = 64
+CREATE_MIN_LENGTH = 16
+CREATE_MAX_LENGTH = 1024
+CREATE_ALPHABET = string.ascii_letters + string.digits + "-_"
+
+KEK_LENGTH = 32
+NONCE_LENGTH = 12
+TAG_LENGTH = 16
+
+FORMAT_PREFIX = "v1:"
+MAX_SERVER_VALUE_LENGTH = 4096
+MAX_PLAINTEXT_LENGTH = 3041
+
+HTTP_TIMEOUT = 15
+
+
+class KeyportError(Exception):
+    pass
+
+
+def fail(message):
+    print(f"keyport-client: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        raise KeyportError(
+            f"configuration file not found: {CONFIG_FILE}"
+        )
+    except OSError as e:
+        raise KeyportError(
+            f"cannot read configuration: {e}"
+        )
+
+    config = {}
+
+    for lineno, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        if "=" not in line:
+            raise KeyportError(
+                f"invalid configuration line {lineno}: "
+                f"expected KEY=VALUE"
+            )
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if not key:
+            raise KeyportError(
+                f"invalid configuration line {lineno}"
+            )
+
+        if key in config:
+            raise KeyportError(
+                f"duplicate configuration key: {key}"
+            )
+
+        config[key] = value
+
+    required = (
+        "KEYPORT_URL",
+        "KEYPORT_SCOPE",
+        "KEYPORT_API_KEY",
+        "KEYPORT_KEK_BASE64",
+    )
+
+    for key in required:
+        if not config.get(key):
+            raise KeyportError(
+                f"missing configuration value: {key}"
+            )
+
+    validate_name(config["KEYPORT_SCOPE"], "scope")
+
+    url = config["KEYPORT_URL"].rstrip("/")
+
+    parsed = urllib.parse.urlparse(url)
+
+    if parsed.scheme.lower() != "https":
+        raise KeyportError(
+            "KEYPORT_URL must use HTTPS"
+        )
+
+    if not parsed.hostname:
+        raise KeyportError(
+            "KEYPORT_URL is invalid"
+        )
+
+    if parsed.username is not None or parsed.password is not None:
+        raise KeyportError(
+            "KEYPORT_URL must not contain credentials"
+        )
+
+    if parsed.query or parsed.fragment:
+        raise KeyportError(
+            "KEYPORT_URL must not contain a query or fragment"
+        )
+
+    if parsed.path not in ("", "/"):
+        raise KeyportError(
+            "KEYPORT_URL must not contain a path"
+        )
+
+    config["KEYPORT_URL"] = url
+
+    return config
+
+
+def validate_name(value, label):
+    if not NAME_RE.fullmatch(value):
+        raise KeyportError(
+            f"invalid {label}: must match {NAME_RE.pattern}"
+        )
+
+
+def load_kek(config):
+    encoded = config["KEYPORT_KEK_BASE64"]
+
+    try:
+        kek = base64.b64decode(
+            encoded,
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        raise KeyportError(
+            "KEYPORT_KEK_BASE64 is not valid Base64"
+        )
+
+    if len(kek) != KEK_LENGTH:
+        raise KeyportError(
+            f"KEYPORT_KEK_BASE64 must decode to exactly "
+            f"{KEK_LENGTH} bytes"
+        )
+
+    return kek
+
+
+def make_url(config, keyname):
+    validate_name(keyname, "key name")
+
+    scope = config["KEYPORT_SCOPE"]
+    base = config["KEYPORT_URL"]
+
+    return (
+        f"{base}/key/"
+        f"{urllib.parse.quote(scope, safe='')}/"
+        f"{urllib.parse.quote(keyname, safe='')}"
+    )
+
+
+def make_aad(config, keyname):
+    return (
+        f"{config['KEYPORT_SCOPE']}/{keyname}"
+    ).encode("ascii")
+
+
+def encrypt_value(config, keyname, plaintext):
+    validate_name(keyname, "key name")
+
+    kek = load_kek(config)
+    nonce = os.urandom(NONCE_LENGTH)
+
+    encrypted = AESGCM(kek).encrypt(
+        nonce,
+        plaintext,
+        make_aad(config, keyname),
+    )
+
+    payload = nonce + encrypted
+
+    value = (
+        FORMAT_PREFIX
+        + base64.b64encode(payload).decode("ascii")
+    )
+
+    if len(value) > MAX_SERVER_VALUE_LENGTH:
+        raise KeyportError(
+            "encrypted value exceeds server limit "
+            f"({len(value)} > {MAX_SERVER_VALUE_LENGTH})"
+        )
+
+    return value
+
+
+def decrypt_value(config, keyname, value):
+    validate_name(keyname, "key name")
+
+    if not isinstance(value, str):
+        raise KeyportError(
+            "server returned a non-string key value"
+        )
+
+    if not value.startswith(FORMAT_PREFIX):
+        raise KeyportError(
+            "unsupported encrypted value format"
+        )
+
+    encoded = value[len(FORMAT_PREFIX):]
+
+    try:
+        payload = base64.b64decode(
+            encoded,
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        raise KeyportError(
+            "invalid Base64 in encrypted value"
+        )
+
+    minimum_length = NONCE_LENGTH + TAG_LENGTH
+
+    if len(payload) < minimum_length:
+        raise KeyportError(
+            "encrypted value is too short"
+        )
+
+    nonce = payload[:NONCE_LENGTH]
+    encrypted = payload[NONCE_LENGTH:]
+
+    try:
+        return AESGCM(load_kek(config)).decrypt(
+            nonce,
+            encrypted,
+            make_aad(config, keyname),
+        )
+    except InvalidTag:
+        raise KeyportError(
+            "decryption failed: invalid KEK, "
+            "scope, key name, or ciphertext"
+        )
+
+
+def http_request(
+    config,
+    keyname,
+    method,
+    body=None,
+):
+    url = make_url(config, keyname)
+
+    headers = {
+        "Authorization":
+            f"Bearer {config['KEYPORT_API_KEY']}",
+        "Accept": "application/json",
+    }
+
+    data = None
+
+    if body is not None:
+        data = json.dumps(
+            body,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+
+        headers["Content-Type"] = "application/json"
+
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method=method,
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=HTTP_TIMEOUT,
+        ) as response:
+            return response.status, response.read()
+
+    except urllib.error.HTTPError as e:
+        try:
+            e.read()
+        except Exception:
+            pass
+
+        messages = {
+            400: "server rejected the request",
+            401: "authentication failed",
+            403: "access denied",
+            404: "key not found",
+            413: "request is too large",
+            429: "rate limit exceeded",
+            503: "service unavailable",
+        }
+
+        message = messages.get(
+            e.code,
+            f"server returned HTTP {e.code}",
+        )
+
+        raise KeyportError(message)
+
+    except urllib.error.URLError as e:
+        raise KeyportError(
+            f"connection failed: {e.reason}"
+        )
+
+    except TimeoutError:
+        raise KeyportError(
+            "connection timed out"
+        )
+
+
+def push_value(config, keyname, plaintext):
+    encrypted = encrypt_value(
+        config,
+        keyname,
+        plaintext,
+    )
+
+    status, _ = http_request(
+        config,
+        keyname,
+        "POST",
+        {"key": encrypted},
+    )
+
+    if status != 204:
+        raise KeyportError(
+            f"unexpected HTTP response: {status}"
+        )
+
+
+def command_get(args):
+    config = load_config()
+
+    status, body = http_request(
+        config,
+        args.keyname,
+        "GET",
+    )
+
+    if status != 200:
+        raise KeyportError(
+            f"unexpected HTTP response: {status}"
+        )
+
+    try:
+        response = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise KeyportError(
+            "server returned invalid JSON"
+        )
+
+    if (
+        not isinstance(response, dict)
+        or set(response.keys()) != {"key"}
+    ):
+        raise KeyportError(
+            "server returned an unexpected response"
+        )
+
+    plaintext = decrypt_value(
+        config,
+        args.keyname,
+        response["key"],
+    )
+
+    sys.stdout.buffer.write(plaintext)
+    sys.stdout.buffer.flush()
+
+
+def command_push(args):
+    config = load_config()
+
+    plaintext = sys.stdin.buffer.read(
+        MAX_PLAINTEXT_LENGTH + 1
+    )
+
+    if len(plaintext) > MAX_PLAINTEXT_LENGTH:
+        raise KeyportError(
+            "plaintext exceeds maximum size "
+            f"({MAX_PLAINTEXT_LENGTH} bytes)"
+        )
+
+    push_value(
+        config,
+        args.keyname,
+        plaintext,
+    )
+
+
+def command_create(args):
+    validate_name(
+        args.keyname,
+        "key name",
+    )
+
+    if not (
+        CREATE_MIN_LENGTH
+        <= args.length
+        <= CREATE_MAX_LENGTH
+    ):
+        raise KeyportError(
+            "length must be between "
+            f"{CREATE_MIN_LENGTH} and "
+            f"{CREATE_MAX_LENGTH}"
+        )
+
+    generated = "".join(
+        secrets.choice(CREATE_ALPHABET)
+        for _ in range(args.length)
+    ).encode("ascii")
+
+    if args.push:
+        config = load_config()
+
+        push_value(
+            config,
+            args.keyname,
+            generated,
+        )
+
+    sys.stdout.buffer.write(generated)
+    sys.stdout.buffer.write(b"\n")
+    sys.stdout.buffer.flush()
+
+
+def command_delete(args):
+    config = load_config()
+
+    status, _ = http_request(
+        config,
+        args.keyname,
+        "DELETE",
+    )
+
+    if status != 204:
+        raise KeyportError(
+            f"unexpected HTTP response: {status}"
+        )
+
+
+def command_kek_generate(args):
+    kek = secrets.token_bytes(KEK_LENGTH)
+
+    encoded = base64.b64encode(kek)
+
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.write(b"\n")
+    sys.stdout.buffer.flush()
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="keyport-client",
+        description="Keyport client",
+    )
+
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+
+    get_parser = commands.add_parser(
+        "get",
+        help="retrieve and decrypt a key",
+    )
+
+    get_parser.add_argument(
+        "keyname",
+    )
+
+    get_parser.set_defaults(
+        func=command_get,
+    )
+
+    push_parser = commands.add_parser(
+        "push",
+        help="encrypt stdin and store it in Keyport",
+    )
+
+    push_parser.add_argument(
+        "keyname",
+    )
+
+    push_parser.set_defaults(
+        func=command_push,
+    )
+
+    create_parser = commands.add_parser(
+        "create",
+        help="generate a random ASCII key",
+    )
+
+    create_parser.add_argument(
+        "keyname",
+    )
+
+    create_parser.add_argument(
+        "--length",
+        type=int,
+        default=CREATE_DEFAULT_LENGTH,
+        metavar="N",
+        help=(
+            "key length "
+            f"({CREATE_MIN_LENGTH}-"
+            f"{CREATE_MAX_LENGTH}, "
+            f"default: {CREATE_DEFAULT_LENGTH})"
+        ),
+    )
+
+    create_parser.add_argument(
+        "--push",
+        action="store_true",
+        help=(
+            "store the generated key in Keyport "
+            "before writing it to stdout"
+        ),
+    )
+
+    create_parser.set_defaults(
+        func=command_create,
+    )
+
+    delete_parser = commands.add_parser(
+        "delete",
+        help="delete a key from Keyport",
+    )
+
+    delete_parser.add_argument(
+        "keyname",
+    )
+
+    delete_parser.set_defaults(
+        func=command_delete,
+    )
+
+    kek_parser = commands.add_parser(
+        "kek",
+        help="KEK operations",
+    )
+
+    kek_commands = kek_parser.add_subparsers(
+        dest="kek_command",
+        required=True,
+    )
+
+    kek_generate = kek_commands.add_parser(
+        "generate",
+        help="generate a 256-bit KEK",
+    )
+
+    kek_generate.set_defaults(
+        func=command_kek_generate,
+    )
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    try:
+        args.func(args)
+
+    except KeyportError as e:
+        fail(str(e))
+
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except OSError:
+            pass
+
+        sys.exit(1)
+
+    except KeyboardInterrupt:
+        fail("interrupted")
+
+
+if __name__ == "__main__":
+    main()

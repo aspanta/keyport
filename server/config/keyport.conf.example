@@ -1,0 +1,4 @@
+DB_SOCKET=/run/mysqld/mysqld.sock
+DB_NAME=keyport
+DB_USER=keyport
+DB_PASSWORD=CHANGE_ME

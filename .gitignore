@@ -1,0 +1,27 @@
+# Secrets and local configuration
+keyport.conf
+*.env
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Runtime
+.gunicorn/
+*.pid
+*.sock
+
+# Backups
+*.bak
+*.backup
+*.pre-*
+
+# Editors / OS
+*~
+*.swp
+.DS_Store
+
+# Keyport client configuration
+keyport-client.conf

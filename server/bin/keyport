@@ -1,0 +1,667 @@
+#!/opt/keyport/venv/bin/python
+
+import argparse
+import hashlib
+import ipaddress
+import os
+import re
+import secrets
+import sys
+
+import pymysql
+
+
+CONFIG_FILE = "/opt/keyport/keyport.conf"
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def die(message, code=1):
+    print(f"Error: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config():
+    config = {}
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="ascii") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+
+                if not line or line.startswith("#"):
+                    continue
+
+                if "=" not in line:
+                    die(f"{CONFIG_FILE}:{lineno}: invalid configuration line")
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+
+                if not key:
+                    die(f"{CONFIG_FILE}:{lineno}: empty configuration key")
+
+                config[key] = value
+
+    except OSError as exc:
+        die(f"cannot read {CONFIG_FILE}: {exc}")
+
+    required = (
+        "DB_SOCKET",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+    )
+
+    for key in required:
+        if not config.get(key):
+            die(f"{key} is not configured")
+
+    return config
+
+
+def get_db():
+    config = load_config()
+
+    return pymysql.connect(
+        unix_socket=config["DB_SOCKET"],
+        user=config["DB_USER"],
+        password=config["DB_PASSWORD"],
+        database=config["DB_NAME"],
+        charset="ascii",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
+
+
+def validate_scope_name(name):
+    if not NAME_RE.fullmatch(name):
+        die(
+            "invalid scope name; expected "
+            "[a-z0-9][a-z0-9_-]{0,63}"
+        )
+
+    return name
+
+
+def canonical_source(value):
+    try:
+        if "/" in value:
+            return str(ipaddress.ip_network(value, strict=False))
+
+        return str(ipaddress.ip_address(value))
+
+    except ValueError:
+        die(f"invalid IP address or CIDR: {value}")
+
+
+def get_scope(db, name):
+    with db.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                name,
+                state,
+                lock_on_source_mismatch,
+                created_at,
+                updated_at
+            FROM scopes
+            WHERE name = %s
+            """,
+            (name,),
+        )
+        return cursor.fetchone()
+
+
+def require_scope(db, name):
+    scope = get_scope(db, name)
+
+    if scope is None:
+        die(f"scope '{name}' does not exist")
+
+    return scope
+
+
+def cmd_scope_list(args):
+    with get_db() as db:
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    name,
+                    state,
+                    lock_on_source_mismatch,
+                    created_at
+                FROM scopes
+                ORDER BY name
+                """
+            )
+            rows = cursor.fetchall()
+
+    if not rows:
+        print("No scopes.")
+        return
+
+    print(
+        f"{'NAME':<24} "
+        f"{'STATE':<10} "
+        f"{'LOCK-ON-SOURCE-MISMATCH':<24} "
+        f"CREATED"
+    )
+
+    for row in rows:
+        lock = "on" if row["lock_on_source_mismatch"] else "off"
+
+        print(
+            f"{row['name']:<24} "
+            f"{row['state']:<10} "
+            f"{lock:<24} "
+            f"{row['created_at']}"
+        )
+
+
+def cmd_scope_show(args):
+    name = validate_scope_name(args.scope)
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT source
+                FROM sources
+                WHERE scope_id = %s
+                ORDER BY source
+                """,
+                (scope["id"],),
+            )
+            sources = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT id, created_at
+                FROM credentials
+                WHERE scope_id = %s
+                ORDER BY id
+                """,
+                (scope["id"],),
+            )
+            credentials = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT keyname, created_at, updated_at
+                FROM `keys`
+                WHERE scope_id = %s
+                ORDER BY keyname
+                """,
+                (scope["id"],),
+            )
+            keys = cursor.fetchall()
+
+    print(f"Name:                    {scope['name']}")
+    print(f"State:                   {scope['state']}")
+    print(
+        "Lock on source mismatch: "
+        + ("on" if scope["lock_on_source_mismatch"] else "off")
+    )
+    print(f"Created:                 {scope['created_at']}")
+    print(f"Updated:                 {scope['updated_at']}")
+
+    print()
+    print("Sources:")
+
+    if sources:
+        for row in sources:
+            print(f"  {row['source']}")
+    else:
+        print("  (none)")
+
+    print()
+    print("Credentials:")
+
+    if credentials:
+        for row in credentials:
+            print(f"  {row['id']}  {row['created_at']}")
+    else:
+        print("  (none)")
+
+    print()
+    print("Keys:")
+
+    if keys:
+        for row in keys:
+            print(
+                f"  {row['keyname']}  "
+                f"created={row['created_at']}  "
+                f"updated={row['updated_at']}"
+            )
+    else:
+        print("  (none)")
+
+
+def cmd_scope_add(args):
+    name = validate_scope_name(args.scope)
+
+    with get_db() as db:
+        try:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO scopes (name)
+                    VALUES (%s)
+                    """,
+                    (name,),
+                )
+
+            db.commit()
+
+        except pymysql.err.IntegrityError:
+            db.rollback()
+            die(f"scope '{name}' already exists")
+
+    print(f"Scope '{name}' created.")
+
+
+def cmd_scope_delete(args):
+    name = validate_scope_name(args.scope)
+
+    with get_db() as db:
+        require_scope(db, name)
+
+        if not args.yes:
+            answer = input(
+                f"Delete scope '{name}' and all associated data? [y/N]: "
+            )
+
+            if answer.lower() not in ("y", "yes"):
+                print("Cancelled.")
+                return
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM scopes
+                WHERE name = %s
+                """,
+                (name,),
+            )
+
+        db.commit()
+
+    print(f"Scope '{name}' deleted.")
+
+
+def set_scope_state(name, state):
+    name = validate_scope_name(name)
+
+    with get_db() as db:
+        require_scope(db, name)
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE scopes
+                SET state = %s
+                WHERE name = %s
+                """,
+                (state, name),
+            )
+
+        db.commit()
+
+    print(f"Scope '{name}' state: {state}")
+
+
+def cmd_scope_lock(args):
+    set_scope_state(args.scope, "LOCKED")
+
+
+def cmd_scope_unlock(args):
+    set_scope_state(args.scope, "ACTIVE")
+
+
+def cmd_scope_disable(args):
+    set_scope_state(args.scope, "DISABLED")
+
+
+def cmd_scope_enable(args):
+    set_scope_state(args.scope, "ACTIVE")
+
+
+def cmd_scope_set(args):
+    name = validate_scope_name(args.scope)
+
+    if args.setting != "lock-on-source-mismatch":
+        die(f"unsupported setting: {args.setting}")
+
+    value = 1 if args.value == "on" else 0
+
+    with get_db() as db:
+        require_scope(db, name)
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE scopes
+                SET lock_on_source_mismatch = %s
+                WHERE name = %s
+                """,
+                (value, name),
+            )
+
+        db.commit()
+
+    print(
+        f"Scope '{name}' lock-on-source-mismatch: {args.value}"
+    )
+
+
+def cmd_source_list(args):
+    name = validate_scope_name(args.scope)
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT source, created_at
+                FROM sources
+                WHERE scope_id = %s
+                ORDER BY source
+                """,
+                (scope["id"],),
+            )
+            rows = cursor.fetchall()
+
+    if not rows:
+        print("No sources.")
+        return
+
+    print(f"{'SOURCE':<50} CREATED")
+
+    for row in rows:
+        print(f"{row['source']:<50} {row['created_at']}")
+
+
+def cmd_source_add(args):
+    name = validate_scope_name(args.scope)
+
+    # Validate the complete set before changing anything.
+    sources = [canonical_source(value) for value in args.sources]
+
+    # Remove duplicates while preserving command-line order.
+    sources = list(dict.fromkeys(sources))
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        try:
+            with db.cursor() as cursor:
+                for source in sources:
+                    cursor.execute(
+                        """
+                        INSERT IGNORE INTO sources
+                            (scope_id, source)
+                        VALUES
+                            (%s, %s)
+                        """,
+                        (scope["id"], source),
+                    )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+    for source in sources:
+        print(f"Source present: {source}")
+
+
+def cmd_source_delete(args):
+    name = validate_scope_name(args.scope)
+
+    sources = [canonical_source(value) for value in args.sources]
+    sources = list(dict.fromkeys(sources))
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        try:
+            with db.cursor() as cursor:
+                for source in sources:
+                    cursor.execute(
+                        """
+                        DELETE FROM sources
+                        WHERE scope_id = %s
+                          AND source = %s
+                        """,
+                        (scope["id"], source),
+                    )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+    for source in sources:
+        print(f"Source absent: {source}")
+
+
+def cmd_credential_list(args):
+    name = validate_scope_name(args.scope)
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, created_at
+                FROM credentials
+                WHERE scope_id = %s
+                ORDER BY id
+                """,
+                (scope["id"],),
+            )
+            rows = cursor.fetchall()
+
+    if not rows:
+        print("No credentials.")
+        return
+
+    print(f"{'ID':<8} CREATED")
+
+    for row in rows:
+        print(f"{row['id']:<8} {row['created_at']}")
+
+
+def cmd_credential_add(args):
+    name = validate_scope_name(args.scope)
+
+    # 32 random bytes = 256 bits of entropy.
+    api_key = secrets.token_urlsafe(32)
+    api_key_hash = hashlib.sha256(api_key.encode("ascii")).digest()
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        try:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO credentials
+                        (scope_id, api_key_hash)
+                    VALUES
+                        (%s, %s)
+                    """,
+                    (scope["id"], api_key_hash),
+                )
+
+                credential_id = cursor.lastrowid
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+    print(f"Credential {credential_id} created.")
+    print()
+    print(f"API key: {api_key}")
+    print()
+    print("Save this API key now. It cannot be retrieved later.")
+
+
+def cmd_credential_delete(args):
+    name = validate_scope_name(args.scope)
+
+    ids = list(dict.fromkeys(args.ids))
+
+    with get_db() as db:
+        scope = require_scope(db, name)
+
+        try:
+            with db.cursor() as cursor:
+                for credential_id in ids:
+                    cursor.execute(
+                        """
+                        DELETE FROM credentials
+                        WHERE scope_id = %s
+                          AND id = %s
+                        """,
+                        (scope["id"], credential_id),
+                    )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+    for credential_id in ids:
+        print(f"Credential absent: {credential_id}")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="keyport",
+        description="Keyport administration CLI",
+    )
+
+    top = parser.add_subparsers(dest="command", required=True)
+
+    scope = top.add_parser("scope")
+    scope_sub = scope.add_subparsers(
+        dest="scope_command",
+        required=True,
+    )
+
+    p = scope_sub.add_parser("list")
+    p.set_defaults(func=cmd_scope_list)
+
+    p = scope_sub.add_parser("show")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_show)
+
+    p = scope_sub.add_parser("add")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_add)
+
+    p = scope_sub.add_parser("delete")
+    p.add_argument("scope")
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="do not ask for confirmation",
+    )
+    p.set_defaults(func=cmd_scope_delete)
+
+    p = scope_sub.add_parser("lock")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_lock)
+
+    p = scope_sub.add_parser("unlock")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_unlock)
+
+    p = scope_sub.add_parser("disable")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_disable)
+
+    p = scope_sub.add_parser("enable")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_scope_enable)
+
+    p = scope_sub.add_parser("set")
+    p.add_argument("scope")
+    p.add_argument(
+        "setting",
+        choices=["lock-on-source-mismatch"],
+    )
+    p.add_argument(
+        "value",
+        choices=["on", "off"],
+    )
+    p.set_defaults(func=cmd_scope_set)
+
+    source = top.add_parser("source")
+    source_sub = source.add_subparsers(
+        dest="source_command",
+        required=True,
+    )
+
+    p = source_sub.add_parser("list")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_source_list)
+
+    p = source_sub.add_parser("add")
+    p.add_argument("scope")
+    p.add_argument("sources", nargs="+")
+    p.set_defaults(func=cmd_source_add)
+
+    p = source_sub.add_parser("delete")
+    p.add_argument("scope")
+    p.add_argument("sources", nargs="+")
+    p.set_defaults(func=cmd_source_delete)
+
+    credential = top.add_parser("credential")
+    credential_sub = credential.add_subparsers(
+        dest="credential_command",
+        required=True,
+    )
+
+    p = credential_sub.add_parser("list")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_credential_list)
+
+    p = credential_sub.add_parser("add")
+    p.add_argument("scope")
+    p.set_defaults(func=cmd_credential_add)
+
+    p = credential_sub.add_parser("delete")
+    p.add_argument("scope")
+    p.add_argument("ids", nargs="+", type=int)
+    p.set_defaults(func=cmd_credential_delete)
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    try:
+        args.func(args)
+
+    except pymysql.MySQLError as exc:
+        die(f"database error: {exc}")
+
+
+if __name__ == "__main__":
+    main()

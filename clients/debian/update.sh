@@ -1,0 +1,111 @@
+#!/bin/bash
+
+set -euo pipefail
+
+BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian"
+
+INSTALL_DIR="/opt/keyport-client"
+
+CLIENT_URL="${BASE_URL}/keyport-client"
+UPDATE_URL="${BASE_URL}/update.sh"
+
+CLIENT_FILE="${INSTALL_DIR}/keyport-client"
+UPDATE_FILE="${INSTALL_DIR}/update.sh"
+
+CLIENT_LINK="/usr/local/sbin/keyport-client"
+UPDATE_LINK="/usr/local/sbin/keyport-client-update"
+
+die() {
+    echo "keyport-client update: $*" >&2
+    exit 1
+}
+
+info() {
+    echo "keyport-client update: $*"
+}
+
+cleanup() {
+    if [[ -n "${TMPDIR_KEYPORT:-}" && -d "${TMPDIR_KEYPORT}" ]]; then
+        rm -rf "${TMPDIR_KEYPORT}"
+    fi
+}
+
+trap cleanup EXIT
+
+if [[ "${EUID}" -ne 0 ]]; then
+    die "must be run as root"
+fi
+
+if [[ ! -d "${INSTALL_DIR}" ]]; then
+    die "Keyport client is not installed in ${INSTALL_DIR}"
+fi
+
+if [[ ! -f "${CLIENT_FILE}" ]]; then
+    die "installed client not found: ${CLIENT_FILE}"
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+    die "curl is required"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    die "python3 is required"
+fi
+
+python3 - <<'PY' \
+    || die "python cryptography package is not usable"
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+AESGCM.generate_key(bit_length=256)
+PY
+
+TMPDIR_KEYPORT="$(mktemp -d)"
+
+CLIENT_SOURCE="${TMPDIR_KEYPORT}/keyport-client"
+UPDATE_SOURCE="${TMPDIR_KEYPORT}/update.sh"
+
+info "downloading current files from main"
+
+curl -fsSL "${CLIENT_URL}" -o "${CLIENT_SOURCE}" \
+    || die "failed to download keyport-client"
+
+curl -fsSL "${UPDATE_URL}" -o "${UPDATE_SOURCE}" \
+    || die "failed to download update.sh"
+
+info "validating downloaded files"
+
+python3 -m py_compile "${CLIENT_SOURCE}" \
+    || die "client validation failed"
+
+bash -n "${UPDATE_SOURCE}" \
+    || die "update script validation failed"
+
+CLIENT_NEW="${INSTALL_DIR}/.keyport-client.new"
+UPDATE_NEW="${INSTALL_DIR}/.update.sh.new"
+
+cleanup_new_files() {
+    rm -f "${CLIENT_NEW}" "${UPDATE_NEW}"
+}
+
+trap 'cleanup_new_files; cleanup' EXIT
+
+install \
+    -o root \
+    -g root \
+    -m 0755 \
+    "${CLIENT_SOURCE}" \
+    "${CLIENT_NEW}"
+
+install \
+    -o root \
+    -g root \
+    -m 0755 \
+    "${UPDATE_SOURCE}" \
+    "${UPDATE_NEW}"
+
+mv -f "${CLIENT_NEW}" "${CLIENT_FILE}"
+mv -f "${UPDATE_NEW}" "${UPDATE_FILE}"
+
+ln -sfn "${CLIENT_FILE}" "${CLIENT_LINK}"
+ln -sfn "${UPDATE_FILE}" "${UPDATE_LINK}"
+
+info "update complete"
