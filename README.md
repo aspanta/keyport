@@ -96,6 +96,32 @@ with Bearer authentication.
 
 See [HTTP API](docs/api.md).
 
+### Example
+
+Create a scope:
+
+```bash
+keyport scope add myserver
+```
+
+Add the client's source IP:
+
+```bash
+keyport source add myserver 203.0.113.10
+```
+
+Create a credential:
+
+```bash
+keyport credential add myserver
+```
+
+Delete the scope:
+
+```bash
+keyport scope delete myserver
+```
+
 ## Server updates
 
 An existing Keyport server can be updated from the `main` branch with the
@@ -138,6 +164,26 @@ keyport-client
 
 `push` and `get` are binary-safe. The client never sends its KEK to the
 Keyport server.
+
+### Example
+
+Store a key:
+
+```bash
+printf '%s' 'my-secret-key' | keyport-client push mykey
+```
+
+Retrieve the key:
+
+```bash
+keyport-client get mykey
+```
+
+Delete the key:
+
+```bash
+keyport-client delete mykey
+```
 
 See [Debian client](clients/debian/README.md).
 
