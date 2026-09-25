@@ -114,7 +114,7 @@ if [[ ! -e "${CONFIG_FILE}" ]]; then
     install \
         -o root \
         -g root \
-        -m 0644 \
+        -m 0600 \
         "${CONFIG_SOURCE}" \
         "${CONFIG_FILE}"
 
@@ -137,6 +137,6 @@ if [[ "${CONFIG_CREATED}" -eq 1 ]]; then
     echo "Configure KEYPORT_URL, KEYPORT_SCOPE, KEYPORT_API_KEY,"
     echo "and KEYPORT_KEK_BASE64 before using the client."
     echo
-    echo "The configuration was created with mode 0644"
-    echo "and is readable by all local users."
+    echo "The configuration was created with mode 0600"
+    echo "and is accessible only to root by default."
 fi
