@@ -161,8 +161,8 @@ Verify the local application health endpoint and then the same endpoint through
 nginx/TLS.
 
 Use a temporary scope and credential to test missing and invalid credentials,
-an allowed source, an unexpected source, a missing key, POST/GET/DELETE, and
-scope lock/unlock behavior.
+an allowed source, an unexpected source, a missing key, key listing,
+POST/GET/DELETE, the 1000-key scope limit, and scope lock/unlock behavior.
 
 Do not deliberately trigger security bans from an administrative address
 unless recovery access has been planned.

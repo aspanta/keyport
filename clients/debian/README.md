@@ -132,6 +132,7 @@ The client provides:
 
 ```text
 keyport-client
+├── list
 ├── get <keyname>
 ├── push <keyname>
 ├── create <keyname> [--length N] [--push]
@@ -145,6 +146,22 @@ Scope and key names must match:
 ```text
 ^[a-z0-9][a-z0-9_-]{0,63}$
 ```
+
+## List keys
+
+```bash
+keyport-client list
+```
+
+This lists the key names in the configured scope, one per line, in
+lexicographic order. Stored key values are not returned.
+
+The operation requires the same authentication, active scope, and source
+authorization as other remote key operations. An empty scope produces no
+output and exits successfully.
+
+A scope may contain at most 1000 keys. Updating an existing key does not count
+as creating an additional key.
 
 ## Generate a KEK
 

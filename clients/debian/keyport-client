@@ -167,15 +167,18 @@ def load_kek(config):
     return kek
 
 
-def make_url(config, keyname):
-    validate_name(keyname, "key name")
-
+def make_url(config, keyname=None):
     scope = config["KEYPORT_SCOPE"]
     base = config["KEYPORT_URL"]
+    scope_path = urllib.parse.quote(scope, safe="")
+
+    if keyname is None:
+        return f"{base}/key/{scope_path}"
+
+    validate_name(keyname, "key name")
 
     return (
-        f"{base}/key/"
-        f"{urllib.parse.quote(scope, safe='')}/"
+        f"{base}/key/{scope_path}/"
         f"{urllib.parse.quote(keyname, safe='')}"
     )
 
@@ -312,6 +315,7 @@ def http_request(
             401: "authentication failed",
             403: "access denied",
             404: "key not found",
+            409: "key limit reached",
             413: "request is too large",
             429: "rate limit exceeded",
             503: "service unavailable",
@@ -353,6 +357,45 @@ def push_value(config, keyname, plaintext):
         raise KeyportError(
             f"unexpected HTTP response: {status}"
         )
+
+
+def command_list(args):
+    config = load_config()
+
+    status, body = http_request(
+        config,
+        None,
+        "GET",
+    )
+
+    if status != 200:
+        raise KeyportError(
+            f"unexpected HTTP response: {status}"
+        )
+
+    try:
+        response = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise KeyportError(
+            "server returned invalid JSON"
+        )
+
+    if (
+        not isinstance(response, dict)
+        or set(response.keys()) != {"keys"}
+        or not isinstance(response["keys"], list)
+        or any(
+            not isinstance(keyname, str)
+            or not NAME_RE.fullmatch(keyname)
+            for keyname in response["keys"]
+        )
+    ):
+        raise KeyportError(
+            "server returned an unexpected response"
+        )
+
+    for keyname in response["keys"]:
+        print(keyname)
 
 
 def command_get(args):
@@ -484,6 +527,15 @@ def build_parser():
     commands = parser.add_subparsers(
         dest="command",
         required=True,
+    )
+
+    list_parser = commands.add_parser(
+        "list",
+        help="list keys in the configured scope",
+    )
+
+    list_parser.set_defaults(
+        func=command_list,
     )
 
     get_parser = commands.add_parser(

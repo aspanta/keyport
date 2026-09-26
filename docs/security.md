@@ -60,6 +60,11 @@ When `lock_on_source_mismatch` is enabled, a request using a valid credential fr
 
 Scopes have three states: `ACTIVE`, `LOCKED`, and `DISABLED`. Only `ACTIVE` scopes authorize key operations.
 
+Authorized clients can enumerate key names in their scope through the list
+operation. The list response contains names only and never stored key values.
+
+Each scope is limited to 1000 stored keys.
+
 ## Audit logging
 
 Authorization and key operations generate audit records. Sensitive values must not be placed in audit records. In particular, audit data must not contain API keys, stored key values, request bodies containing those values, or client KEKs.

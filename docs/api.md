@@ -5,10 +5,11 @@
 Key operations use:
 
 ```text
+/key/{scope}
 /key/{scope}/{keyname}
 ```
 
-Both `scope` and `keyname` must match:
+`scope` and, when present, `keyname` must match:
 
 ```text
 ^[a-z0-9][a-z0-9_-]{0,63}$
@@ -27,6 +28,22 @@ Credentials belong to a single scope. The database stores only the SHA-256 diges
 ## Source authorization
 
 In the reference deployment nginx sets `X-Keyport-Source-IP` from `$remote_addr`. Clients must not be allowed to control this trusted header. The resulting address must match a source address or CIDR configured for the scope.
+
+## List keys
+
+```http
+GET /key/example
+Authorization: Bearer <API_KEY>
+```
+
+A successful request returns `200 OK` with key names in lexicographic order:
+
+```json
+{"keys":["backup-key","diskkey"]}
+```
+
+An empty scope returns `{"keys":[]}`. Stored key values are never included in
+this response.
 
 ## GET
 
@@ -53,7 +70,7 @@ Content-Type: application/json
 {"key":"<opaque value>"}
 ```
 
-The reference nginx configuration limits request bodies to 8 KiB. The application limits the opaque value to 4096 ASCII characters. A successful write returns `204 No Content`. Writing an existing `(scope, keyname)` replaces its current value; Keyport does not maintain value history.
+The reference nginx configuration limits request bodies to 8 KiB. The application limits the opaque value to 4096 ASCII characters. A successful write returns `204 No Content`. Writing an existing `(scope, keyname)` replaces its current value; Keyport does not maintain value history. A scope may contain at most 1000 keys. Attempting to create another key returns `409 Conflict` with `{"error":"key_limit_reached"}`. Updating an existing key remains allowed at the limit.
 
 ## DELETE
 
@@ -70,7 +87,7 @@ The reference deployment exposes `/health` through nginx to the local applicatio
 
 ## Scope states
 
-Key operations require an `ACTIVE` scope. Requests against `LOCKED` or `DISABLED` scopes are rejected.
+Key listing and key operations require an `ACTIVE` scope. Requests against `LOCKED` or `DISABLED` scopes are rejected.
 
 ## Source mismatch locking
 

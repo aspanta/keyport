@@ -63,11 +63,14 @@ A stored key consists of a scope, key name, and opaque key value. Keyport does
 not know whether the value represents a disk key, application secret,
 encrypted token, or another data type.
 
+Authenticated clients may list key names in their scope. Listing does not
+return stored key values. A scope may contain at most 1000 keys.
+
 ## Authorization flow
 
 Conceptually, a key request:
 
-1. validates the scope and key name;
+1. validates the scope and, when applicable, the key name;
 2. determines the source address;
 3. parses and hashes the Bearer credential;
 4. locates the credential and associated scope;

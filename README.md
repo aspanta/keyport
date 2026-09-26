@@ -85,13 +85,15 @@ into security scopes.
 Key operations use:
 
 ```text
+/key/{scope}
 /key/{scope}/{keyname}
 ```
 
 with Bearer authentication.
 
-- `GET` retrieves an opaque value.
-- `POST` creates or replaces an opaque value.
+- `GET /key/{scope}` lists key names in the scope.
+- `GET /key/{scope}/{keyname}` retrieves an opaque value.
+- `POST` creates or replaces an opaque value. A scope may contain at most 1000 keys.
 - `DELETE` removes an opaque value.
 
 See [HTTP API](docs/api.md).
@@ -154,6 +156,7 @@ The client provides:
 
 ```text
 keyport-client
+├── list
 ├── get <keyname>
 ├── push <keyname>
 ├── create <keyname> [--length N] [--push]
@@ -177,6 +180,12 @@ Retrieve the key:
 
 ```bash
 keyport-client get mykey
+```
+
+List keys in the configured scope:
+
+```bash
+keyport-client list
 ```
 
 Delete the key:
