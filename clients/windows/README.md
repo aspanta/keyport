@@ -28,11 +28,23 @@ C:\ProgramData\Keyport\
 └── keyport-client.conf
 ```
 
-`C:\ProgramData\Keyport\bin` is added to the machine `PATH`. A newly opened
-shell can therefore use `keyport-client` and `keyport-client-update` directly.
+`C:\ProgramData\Keyport\bin\` is added to the machine `PATH`. A newly opened
+elevated shell can therefore use `keyport-client` and
+`keyport-client-update` directly.
 
 The installer restricts the Keyport directory ACL to `SYSTEM` and the local
 `Administrators` group. An existing configuration is preserved.
+
+### Administrative access
+
+The Windows client is intended for administrative use.
+
+`C:\ProgramData\Keyport` is restricted to `SYSTEM` and the local
+`Administrators` group because it contains the API credential and KEK.
+
+Run `keyport-client` and `keyport-client-update` from an elevated Command
+Prompt or PowerShell session. They are not intended to be accessible to
+standard users.
 
 ## Updating
 
