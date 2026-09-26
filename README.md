@@ -47,27 +47,30 @@ server/
 ├── app/
 │   └── app.py
 ├── bin/
-│   └── keyport
+│   ├── keyport
+│   └── keyport-update
 ├── config/
-│   ├── fail2ban/
-│   │   ├── filter.conf
-│   │   └── jail.conf
-│   ├── keyport.conf.example
-│   ├── keyport.service
-│   ├── nginx-rate-limit.conf
-│   └── nginx-site.conf
 ├── sql/
 │   ├── migrations/
 │   └── schema.sql
-└── update.sh
 
 clients/
-└── debian/
-    ├── README.md
-    ├── install.sh
-    ├── keyport-client
+├── debian/
+│   ├── bin/
+│   │   ├── keyport-client
+│   │   └── keyport-client-update
+│   ├── keyport-client-install
+│   ├── keyport-client.conf.example
+│   └── README.md
+└── windows/
+    ├── bin/
+    │   ├── keyport-client.cmd
+    │   ├── keyport-client.ps1
+    │   ├── keyport-client-update.cmd
+    │   └── keyport-client-update.ps1
+    ├── keyport-client-install.ps1
     ├── keyport-client.conf.example
-    └── update.sh
+    └── README.md
 
 docs/
 ├── api.md
@@ -147,10 +150,10 @@ Fail2ban, and TLS configuration is not modified by the updater.
 
 See [Server installation and updating](docs/installation.md).
 
-## Debian client
+## Clients
 
-The reference Debian client encrypts and decrypts key material locally using
-AES-256-GCM.
+The Debian and Windows clients encrypt and decrypt key material locally using
+AES-256-GCM and use the same encrypted value format.
 
 The client provides:
 
@@ -194,7 +197,10 @@ Delete the key:
 keyport-client delete mykey
 ```
 
-See [Debian client](clients/debian/README.md).
+Installation and platform-specific configuration are documented separately:
+
+- [Debian client](clients/debian/README.md)
+- [Windows client](clients/windows/README.md)
 
 ## Administration
 

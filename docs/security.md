@@ -106,3 +106,7 @@ Back up the database, deployment configuration, application source/version, and 
 ## Operational principle
 
 Keep the service small. Additional remote administration endpoints, cryptographic responsibilities, plugins, or server-side knowledge of stored values should be added only when there is a clear requirement. The limited feature set is part of the security design.
+
+## Windows client configuration
+
+The reference Windows installer stores the client configuration under `C:\ProgramData\Keyport` and restricts the directory ACL to `SYSTEM` and the local `Administrators` group. The API credential and KEK remain client-side secrets and are not modified by the client updater.

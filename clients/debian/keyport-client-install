@@ -3,16 +3,18 @@
 set -euo pipefail
 
 BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian"
+BIN_URL="${BASE_URL}/bin"
 
 INSTALL_DIR="/opt/keyport-client"
 CONFIG_FILE="${INSTALL_DIR}/keyport-client.conf"
 
-CLIENT_URL="${BASE_URL}/keyport-client"
+CLIENT_URL="${BIN_URL}/keyport-client"
 CONFIG_URL="${BASE_URL}/keyport-client.conf.example"
-UPDATE_URL="${BASE_URL}/update.sh"
+UPDATE_URL="${BIN_URL}/keyport-client-update"
 
-CLIENT_FILE="${INSTALL_DIR}/keyport-client"
-UPDATE_FILE="${INSTALL_DIR}/update.sh"
+BIN_DIR="${INSTALL_DIR}/bin"
+CLIENT_FILE="${BIN_DIR}/keyport-client"
+UPDATE_FILE="${BIN_DIR}/keyport-client-update"
 
 CLIENT_LINK="/usr/local/sbin/keyport-client"
 UPDATE_LINK="/usr/local/sbin/keyport-client-update"
@@ -64,7 +66,7 @@ TMPDIR_KEYPORT="$(mktemp -d)"
 
 CLIENT_SOURCE="${TMPDIR_KEYPORT}/keyport-client"
 CONFIG_SOURCE="${TMPDIR_KEYPORT}/keyport-client.conf.example"
-UPDATE_SOURCE="${TMPDIR_KEYPORT}/update.sh"
+UPDATE_SOURCE="${TMPDIR_KEYPORT}/keyport-client-update"
 
 info "downloading Keyport client from main"
 
@@ -75,7 +77,7 @@ curl -fsSL "${CONFIG_URL}" -o "${CONFIG_SOURCE}" \
     || die "failed to download keyport-client.conf.example"
 
 curl -fsSL "${UPDATE_URL}" -o "${UPDATE_SOURCE}" \
-    || die "failed to download update.sh"
+    || die "failed to download keyport-client-update"
 
 info "validating downloaded files"
 
@@ -91,8 +93,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 AESGCM.generate_key(bit_length=256)
 PY
 
-mkdir -p "${INSTALL_DIR}"
-chmod 0755 "${INSTALL_DIR}"
+mkdir -p "${INSTALL_DIR}" "${BIN_DIR}"
+chmod 0755 "${INSTALL_DIR}" "${BIN_DIR}"
 
 install \
     -o root \

@@ -2,15 +2,16 @@
 
 set -euo pipefail
 
-BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian"
+BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian/bin"
 
 INSTALL_DIR="/opt/keyport-client"
 
 CLIENT_URL="${BASE_URL}/keyport-client"
-UPDATE_URL="${BASE_URL}/update.sh"
+UPDATE_URL="${BASE_URL}/keyport-client-update"
 
-CLIENT_FILE="${INSTALL_DIR}/keyport-client"
-UPDATE_FILE="${INSTALL_DIR}/update.sh"
+BIN_DIR="${INSTALL_DIR}/bin"
+CLIENT_FILE="${BIN_DIR}/keyport-client"
+UPDATE_FILE="${BIN_DIR}/keyport-client-update"
 
 CLIENT_LINK="/usr/local/sbin/keyport-client"
 UPDATE_LINK="/usr/local/sbin/keyport-client-update"
@@ -61,7 +62,7 @@ PY
 TMPDIR_KEYPORT="$(mktemp -d)"
 
 CLIENT_SOURCE="${TMPDIR_KEYPORT}/keyport-client"
-UPDATE_SOURCE="${TMPDIR_KEYPORT}/update.sh"
+UPDATE_SOURCE="${TMPDIR_KEYPORT}/keyport-client-update"
 
 info "downloading current files from main"
 
@@ -69,7 +70,7 @@ curl -fsSL "${CLIENT_URL}" -o "${CLIENT_SOURCE}" \
     || die "failed to download keyport-client"
 
 curl -fsSL "${UPDATE_URL}" -o "${UPDATE_SOURCE}" \
-    || die "failed to download update.sh"
+    || die "failed to download keyport-client-update"
 
 info "validating downloaded files"
 
@@ -79,8 +80,8 @@ python3 -m py_compile "${CLIENT_SOURCE}" \
 bash -n "${UPDATE_SOURCE}" \
     || die "update script validation failed"
 
-CLIENT_NEW="${INSTALL_DIR}/.keyport-client.new"
-UPDATE_NEW="${INSTALL_DIR}/.update.sh.new"
+CLIENT_NEW="${BIN_DIR}/.keyport-client.new"
+UPDATE_NEW="${BIN_DIR}/.keyport-client-update.new"
 
 cleanup_new_files() {
     rm -f "${CLIENT_NEW}" "${UPDATE_NEW}"

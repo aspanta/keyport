@@ -24,7 +24,7 @@ apt install python3-cryptography
 Install the current version from the `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian/keyport-client-install | sudo bash
 ```
 
 The installer:
@@ -40,9 +40,10 @@ The resulting layout is:
 
 ```text
 /opt/keyport-client/
-├── keyport-client
-├── keyport-client.conf
-└── update.sh
+├── bin/
+│   ├── keyport-client
+│   └── keyport-client-update
+└── keyport-client.conf
 
 /usr/local/sbin/keyport-client
 /usr/local/sbin/keyport-client-update

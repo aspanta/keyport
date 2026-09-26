@@ -169,7 +169,7 @@ unless recovery access has been planned.
 
 ## Server updater
 
-`server/update.sh` updates an existing Keyport installation from the current
+`server/bin/keyport-update` updates an existing Keyport installation from the current
 `main` branch of the Keyport repository.
 
 It is intended for an already configured server. It is not a general-purpose
@@ -180,7 +180,6 @@ The updater manages:
 ```text
 /opt/keyport/app
 /opt/keyport/bin
-/opt/keyport/update.sh
 ```
 
 and database migrations under:
@@ -209,19 +208,19 @@ On an existing Keyport server, the updater can initially be run directly from
 the `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/server/update.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/server/bin/keyport-update | sudo bash
 ```
 
 After a successful update, the updater installs itself as:
 
 ```text
-/opt/keyport/update.sh
+/opt/keyport/bin/keyport-update
 ```
 
 and creates:
 
 ```text
-/usr/local/sbin/keyport-update -> /opt/keyport/update.sh
+/usr/local/sbin/keyport-update -> /opt/keyport/bin/keyport-update
 ```
 
 Subsequent updates can therefore be run with:
@@ -244,7 +243,7 @@ The updater:
 8. switches the deployed application trees;
 9. restarts `keyport.service`;
 10. verifies the local `/health` endpoint;
-11. installs the new updater after the application has passed its health check.
+11. keeps the updater as part of the managed `bin/` tree; rollback restores the previous updater together with that tree.
 
 Because complete `app/` and `bin/` trees are replaced, files added to the
 repository are deployed automatically and files removed from the repository

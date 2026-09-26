@@ -180,9 +180,14 @@ If the new application fails to start or fails its health check, the previous
 automatically reverted, which is why migrations must remain compatible with
 the previous application version.
 
-The updater itself is replaced only after the updated application has passed
-the health check.
+The updater is part of the managed `bin/` tree. If the updated application fails
+the health check, rollback restores the previous `bin/` tree, including the
+previous updater.
 
 Infrastructure-specific configuration remains outside automatic updates. In
 particular, the updater does not modify `keyport.conf`, the Python virtual
 environment, systemd, nginx, Fail2ban, or TLS configuration.
+
+## Client interoperability
+
+The Debian and Windows clients use the same AES-256-GCM encrypted value format and `scope/keyname` AAD. With the same scope and KEK, either client can decrypt values written by the other.

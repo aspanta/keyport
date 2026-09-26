@@ -11,7 +11,6 @@ INSTALL_DIR="/opt/keyport"
 APP_DIR="${INSTALL_DIR}/app"
 BIN_DIR="${INSTALL_DIR}/bin"
 CONFIG_FILE="${INSTALL_DIR}/keyport.conf"
-UPDATE_FILE="${INSTALL_DIR}/update.sh"
 
 SERVICE="keyport.service"
 HEALTH_URL="http://127.0.0.1:8000/health"
@@ -128,7 +127,7 @@ SERVER_SOURCE="${SOURCE_DIR}/server"
 APP_SOURCE="${SERVER_SOURCE}/app"
 BIN_SOURCE="${SERVER_SOURCE}/bin"
 MIGRATIONS_SOURCE="${SERVER_SOURCE}/sql/migrations"
-UPDATE_SOURCE="${SERVER_SOURCE}/update.sh"
+UPDATE_SOURCE="${BIN_SOURCE}/keyport-update"
 
 [[ -d "${APP_SOURCE}" ]] \
     || die "downloaded repository does not contain server/app"
@@ -137,7 +136,7 @@ UPDATE_SOURCE="${SERVER_SOURCE}/update.sh"
     || die "downloaded repository does not contain server/bin"
 
 [[ -f "${UPDATE_SOURCE}" ]] \
-    || die "downloaded repository does not contain server/update.sh"
+    || die "downloaded repository does not contain server/bin/keyport-update"
 
 #
 # Validate downloaded code.
@@ -451,23 +450,11 @@ if [[ "${HEALTH_OK}" -ne 1 ]]; then
 fi
 
 #
-# New application is healthy.
-# Update the updater itself only now.
+# New application is healthy. The updater is part of the deployed bin tree.
 #
 
-UPDATE_NEW="${INSTALL_DIR}/.update.sh.new"
-
-install \
-    -o root \
-    -g root \
-    -m 0755 \
-    "${UPDATE_SOURCE}" \
-    "${UPDATE_NEW}"
-
-mv -f "${UPDATE_NEW}" "${UPDATE_FILE}"
-
 ln -sfn "${INSTALL_DIR}/bin/keyport" /usr/local/sbin/keyport
-ln -sfn "${UPDATE_FILE}" /usr/local/sbin/keyport-update
+ln -sfn "${INSTALL_DIR}/bin/keyport-update" /usr/local/sbin/keyport-update
 
 #
 # Deployment succeeded. Old application trees are no longer needed.
