@@ -155,7 +155,7 @@ def test_audit_failure_fails_closed(service, monkeypatch, method):
 
 def test_readiness_success(service):
     client, path = service
-    assert client.get("/ready").json == {"status": "ready"}
+    assert client.get("/ready").json == {"status": "ready", **api.BUILD_INFO}
     assert stored(path)
 
 
@@ -177,3 +177,11 @@ def test_readiness_failure_does_not_break_liveness(service, monkeypatch, failure
 def test_readiness_is_local_only(service, headers, remote):
     client, _ = service
     assert client.get("/ready", headers=headers, environ_overrides={"REMOTE_ADDR": remote}).status_code == 404
+
+
+def test_health_and_readiness_report_loaded_revision(service, monkeypatch):
+    client, _ = service
+    info = {"version": "1.2.0", "commit": "a" * 40}
+    monkeypatch.setattr(api, "BUILD_INFO", info)
+    assert client.get("/health").json == {"status": "ok", **info}
+    assert client.get("/ready").json == {"status": "ready", **info}

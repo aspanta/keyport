@@ -6,6 +6,7 @@ import binascii
 import json
 import os
 import re
+from pathlib import Path
 import secrets
 import string
 import sys
@@ -39,6 +40,31 @@ HTTP_TIMEOUT = 15
 
 class KeyportError(Exception):
     pass
+
+
+BUILD_INFO_FILE = Path(__file__).resolve().parents[1] / "build-info.json"
+
+
+def load_build_info():
+    """Read installed metadata only; never infer a deployed revision from main."""
+    try:
+        info = json.loads(BUILD_INFO_FILE.read_text(encoding="utf-8"))
+        if (
+            not isinstance(info, dict)
+            or not isinstance(info.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", info["version"])
+            or not isinstance(info.get("commit"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", info["commit"])
+        ):
+            raise ValueError("invalid build metadata")
+        return {"version": info["version"], "commit": info["commit"]}
+    except (OSError, ValueError, UnicodeError):
+        return {"version": "unknown", "commit": "unknown"}
+
+
+def version_text(program):
+    info = load_build_info()
+    return f"{program} {info['version']} ({info['commit'][:12]})"
 
 
 def fail(message):
@@ -522,6 +548,11 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="keyport-client",
         description="Keyport client",
+    )
+
+    parser.add_argument(
+        "-v", "--version", action="version", version=version_text("keyport-client"),
+        help="show version information and exit",
     )
 
     commands = parser.add_subparsers(

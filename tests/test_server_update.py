@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIM = r'''
-import os, pathlib, shutil, signal, subprocess, sys
+import json, os, pathlib, shutil, signal, subprocess, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 root = pathlib.Path(os.environ['UPDATE_TEST_ROOT'])
@@ -18,10 +18,20 @@ mode = os.environ.get('UPDATE_TEST_MODE', '')
 with (root / 'commands').open('a') as log:
     log.write(name + ' ' + ' '.join(args) + '\n')
 if name == 'curl':
-    if '--output' in args:
+    if args[-1].endswith('/commits/main'):
+        print(json.dumps({'sha': 'a' * 40}))
+    elif '--output' in args:
+        assert args[-1].endswith('/' + 'a' * 40 + '.tar.gz')
         shutil.copyfile(root / 'source.tar.gz', args[args.index('--output') + 1])
     elif (mode == 'readiness' and args[-1].endswith('/ready')) or mode == 'rollback_health':
         sys.exit(22)
+    elif args[-1].endswith('/ready'):
+        info = json.loads((root / 'install/app/build-info.json').read_text())
+        if mode == 'wrong_commit': info['commit'] = 'b' * 40
+        if mode == 'wrong_version': info['version'] = '0.0.0'
+        print(json.dumps(dict(status='ready', **info)))
+    else:
+        print('{"status":"ok"}')
 elif name == 'mariadb':
     if not any(a.startswith('--execute=') for a in args):
         sys.stdin.read()
@@ -61,6 +71,7 @@ def installation(tmp_path):
     (install / 'keyport.conf').write_text('DB_SOCKET=/fake.sock\nDB_NAME=keyport\nDB_USER=test\nDB_PASSWORD=test\n')
     with tarfile.open(tmp_path / 'source.tar.gz', 'w:gz') as archive:
         archive.add(ROOT / 'server', arcname='keyport/server')
+        archive.add(ROOT / 'VERSION', arcname='keyport/VERSION')
     shims = tmp_path / 'shims'
     shims.mkdir()
     for name in ('curl', 'mariadb', 'systemctl', 'mv', 'cp', 'chown', 'sleep'):
@@ -96,12 +107,14 @@ def test_success(installation):
     result = run(installation)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (install / 'app/app.py').is_file()
+    import json
+    assert json.loads((install / 'app/build-info.json').read_text()) == {'version': (ROOT / 'VERSION').read_text().strip(), 'commit': 'a' * 40}
     assert (install / 'bin/keyport').is_file()
     assert not (install / '.app.old').exists()
     assert '/ready' in (root / 'commands').read_text()
 
 
-@pytest.mark.parametrize('mode', ['move1', 'move2', 'move3', 'move4', 'restart', 'readiness', 'signal1', 'signal2', 'signal3', 'signal4', 'interrupt3'])
+@pytest.mark.parametrize('mode', ['move1', 'move2', 'move3', 'move4', 'restart', 'readiness', 'signal1', 'signal2', 'signal3', 'signal4', 'interrupt3', 'wrong_commit', 'wrong_version'])
 def test_failure_restores_original(installation, mode):
     result = run(installation, mode)
     assert result.returncode != 0

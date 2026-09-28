@@ -254,3 +254,14 @@ Copyright 2026 Aspanta Limited.
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for
 details.
+
+## Installed version
+
+All CLI commands support `-h` / `--help` and `-v` / `--version`, including both
+updaters and the Debian/Windows clients. The server's `/health` and local
+`/ready` responses also include `version` and `commit`.
+
+The release comes from `VERSION`. Installers/updaters pin downloads to one
+commit and generate `build-info.json`: inside `app/` on the server, at the
+installation root for clients. Metadata rolls back with the code. Legacy
+installations without metadata report `unknown`.

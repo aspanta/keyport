@@ -379,3 +379,29 @@ credential and the KEK. Protect that configuration accordingly.
 Keyport reduces the amount of plaintext key material that must be stored on the
 remote server, but it does not protect a client whose local operating system,
 configuration, or runtime has been fully compromised.
+
+## Version metadata and update recovery
+
+`keyport-client -h` / `--help` and `-v` / `--version` are also supported by
+`keyport-client-update`. Version output is local and does not read credentials
+or contact Keyport. Unknown updater arguments fail without updating.
+
+Installation and updating resolve `main` once, then download `VERSION` and
+all client files from that commit. `/opt/keyport-client/build-info.json` holds
+the release number and full SHA; it belongs in the installation root, not `bin`.
+Missing/invalid metadata reports `unknown (unknown)`.
+
+Binary replacement and metadata replacement share recovery backups in
+`/opt/keyport-client/.update-backup`. A handled failure restores both, including
+removing newly created metadata when the previous installation had none. Failed
+recovery retains the backups and blocks the next update. With no installer or
+updater running, preserve this directory, restore the backed-up files to `bin/`
+and `build-info.json` to the installation root, and remove destinations marked
+with `.absent`. Verify recovery before removing the backup directory.
+
+The installer and updater share an exclusive `flock`. On Debian, `.update.lock`
+is intentionally retained as a reusable lock file; its existence is not a held
+lock. Do not unlink it to bypass an active update.
+
+For the first upgrade from an older updater that does not install metadata,
+rerun the current client installer. It preserves the existing configuration.

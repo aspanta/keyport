@@ -25,6 +25,7 @@ C:\ProgramData\Keyport\
 │   ├── keyport-client.ps1
 │   ├── keyport-client-update.cmd
 │   └── keyport-client-update.ps1
+├── build-info.json
 └── keyport-client.conf
 ```
 
@@ -54,16 +55,39 @@ From an elevated shell:
 keyport-client-update
 ```
 
-The updater replaces only files under `bin` and never modifies
+The updater replaces client files under `bin` and updates root-level
+`build-info.json` in the same recovery operation. It preserves
 `keyport-client.conf`.
 
-Only one updater may run at a time. All replacement files and backups are
-prepared before installation begins. If replacement fails, the updater attempts
-to restore every file whose replacement was attempted. If recovery fails or the
-process is interrupted, `.old` backups may remain in `bin`; the next update
-refuses to overwrite them. With no updater running, preserve those backups,
-restore the affected files, and verify the client before removing the backups
-and retrying. Do not delete `.update.lock` to bypass a running updater.
+Only one installer/updater may run at a time. The lock is an exclusive open
+file handle, not a test of whether `.update.lock` exists. Windows removes this
+file automatically when the owning handle closes (`DeleteOnClose`). A stale
+file from older versions can be reused safely; a genuinely held lock rejects
+the second process. Do not manually remove a lock held by another process.
+
+All replacement files and backups are prepared before installation begins.
+If replacement fails, every attempted file is restored, including root-level
+metadata. Failed recovery retains `.old` backups next to their destinations;
+`.old.absent` marks a previously missing file. A subsequent update refuses to
+overwrite these recovery records. With no updater running, preserve the backups,
+restore each `.old` file (or remove a destination marked `.old.absent`), and
+verify the client before removing recovery records and retrying.
+
+## Help and version
+
+Both `keyport-client` and `keyport-client-update` support `-h` / `--help` and
+`-v` / `--version`. These options run before privilege checks, configuration
+loading, downloads, and locking; existing filesystem permissions still apply.
+Unknown updater arguments fail instead of starting an update.
+
+Installation and updating resolve `main` once, then download `VERSION` and
+all client files from that exact commit. The release number and full SHA are
+stored in `C:\ProgramData\Keyport\build-info.json`, outside `bin`. Version
+output uses a 12-character SHA and is entirely local. Missing/invalid metadata
+reports `unknown (unknown)`.
+
+For the first upgrade from an updater that does not install metadata, rerun
+the current installer; it preserves the existing client configuration.
 
 ## Configuration
 

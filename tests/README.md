@@ -4,7 +4,7 @@ From the repository root:
 
 ```bash
 python -m pip install -r tests/requirements.txt
-python -m pytest -q tests/test_api.py tests/test_server_update.py tests/test_fail2ban.py
+python -m pytest -q tests
 ```
 
 The API tests use the real Flask router and a transactional SQLite test double;
@@ -20,6 +20,7 @@ On Windows, from Windows PowerShell 5.1:
 
 ```powershell
 ./tests/test_windows_update.ps1
+./tests/test_windows_version.ps1
 ```
 
 These checks load production update functions and inject failures before and
@@ -28,3 +29,10 @@ The injected post-replacement error exercises recovery defensively; it does not
 claim that native `Move-Item` necessarily produces that failure on every system.
 They also exercise a native replacement failure with an exclusively opened
 target file and the updater's exclusive lock. CI runs this suite on Windows.
+
+Version checks cover help/version options without configuration or network,
+missing/corrupt metadata, and API fields. Client update tests verify pinned
+downloads and code/metadata recovery, including legacy installs. Server update
+checks reject a responding service with a different version or SHA. Windows
+checks use a second process to verify lock exclusion, automatic deletion, and
+reuse of stale lock files from older installations.

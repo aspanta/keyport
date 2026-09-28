@@ -83,7 +83,17 @@ Deletion is idempotent and returns `204 No Content`, including when the key is a
 
 ## Health
 
-The reference deployment exposes `/health` through nginx to the local application. It is intended for service health checks and does not perform key authorization.
+The reference deployment exposes `/health` through nginx to the local application.
+It checks process liveness and does not perform key authorization. A successful
+response includes the installed release and full source commit, for example:
+
+```json
+{"status":"ok","version":"1.2.0","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+The SHA above is illustrative. Both metadata fields are `"unknown"` when valid
+installation metadata is unavailable. The API reads metadata once at startup;
+replacing a file underneath a running worker does not change its reported build.
 
 ## Scope states
 
@@ -113,3 +123,7 @@ deletes or changes the stored value. Only `DELETE` removes a key.
 It returns 200 when database connectivity and the API's required columns are
 available, or 503 otherwise. Proxied and non-loopback requests receive 404.
 The public `/health` endpoint continues to check process liveness only.
+
+A successful `/ready` response includes the same `version` and `commit` fields
+with `"status":"ready"`. The updater verifies both against the downloaded
+revision before accepting a deployment.
