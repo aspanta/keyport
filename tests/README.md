@@ -26,4 +26,5 @@ These checks load production update functions and inject failures before and
 after replacement, including failed restoration and retained recovery copies.
 The injected post-replacement error exercises recovery defensively; it does not
 claim that native `Move-Item` necessarily produces that failure on every system.
-They also exercise the exclusive file lock. CI runs this suite on Windows.
+They also exercise a native replacement failure with an exclusively opened
+target file and the updater's exclusive lock. CI runs this suite on Windows.

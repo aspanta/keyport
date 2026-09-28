@@ -213,6 +213,10 @@ the `main` branch:
 curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/server/bin/keyport-update | sudo bash
 ```
 
+An already installed older updater runs its own existing logic during its first
+upgrade. To use the new recovery and readiness checks for that upgrade itself,
+run the current updater using the bootstrap command above.
+
 After a successful update, the updater installs itself as:
 
 ```text

@@ -19,7 +19,14 @@ function Assert($Condition, [string]$Message) {
 function Move-Item([string]$LiteralPath, [string]$Destination, [switch]$Force) {
     $script:moveCount++
     if ($script:mode -eq "before$script:moveCount") { throw 'injected move failure' }
-    Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+    if ($script:mode -eq "locked$script:moveCount") {
+        $held = [IO.File]::Open($Destination, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try {
+            Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+        } finally { $held.Dispose() }
+    } else {
+        Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+    }
     if ($script:mode -eq "after$script:moveCount" -or ($script:mode -eq 'recovery' -and $script:moveCount -eq 2)) { throw 'injected failure after replacement' }
 }
 function Copy-Item([string]$LiteralPath, [string]$Destination, [switch]$Force) {
@@ -30,7 +37,7 @@ function Copy-Item([string]$LiteralPath, [string]$Destination, [switch]$Force) {
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('keyport-tests-' + [Guid]::NewGuid().ToString('N'))
 $names = @('client.ps1', 'client.cmd', 'update.ps1', 'update.cmd')
 try {
-    foreach ($case in @('success','before1','before2','before3','before4','after1','after2','after3','after4','recovery','stale')) {
+    foreach ($case in @('success','before1','before2','before3','before4','after1','after2','after3','after4','locked2','recovery','stale')) {
         $script:mode = $case
         $script:moveCount = 0
         $source = Join-Path $testRoot "$case/source"
