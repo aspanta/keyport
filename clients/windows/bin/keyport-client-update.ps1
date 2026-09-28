@@ -10,10 +10,75 @@ $Files = @('keyport-client.ps1','keyport-client.cmd','keyport-client-update.ps1'
 function Fail([string]$Message) { [Console]::Error.WriteLine("keyport-client update: $Message"); exit 1 }
 function Info([string]$Message) { [Console]::Out.WriteLine("keyport-client update: $Message") }
 
+# Keep file replacement separate so failure and recovery can be exercised
+# without downloading files or changing the real installation.
+function Install-KeyportFiles([string]$SourceDir, [string]$DestinationDir, [string[]]$Names) {
+    foreach ($file in $Names) {
+        $backup = Join-Path $DestinationDir (".$file.old")
+        if (Test-Path -LiteralPath $backup) {
+            throw "recovery required: backup exists at $backup"
+        }
+    }
+
+    $attempted = New-Object System.Collections.Generic.List[string]
+    $removeBackups = $true
+    try {
+        # Prepare every replacement and recovery copy before changing a file.
+        foreach ($file in $Names) {
+            Copy-Item -LiteralPath (Join-Path $SourceDir $file) -Destination (Join-Path $DestinationDir (".$file.new")) -Force
+            Copy-Item -LiteralPath (Join-Path $DestinationDir $file) -Destination (Join-Path $DestinationDir (".$file.old"))
+        }
+        $removeBackups = $false
+        try {
+            foreach ($file in $Names) {
+                # Include the current file even if replacement changes the
+                # destination and then reports failure.
+                $attempted.Add($file)
+                Move-Item -LiteralPath (Join-Path $DestinationDir (".$file.new")) -Destination (Join-Path $DestinationDir $file) -Force
+            }
+            $removeBackups = $true
+        } catch {
+            $updateError = $_
+            $recoveryErrors = New-Object System.Collections.Generic.List[string]
+            foreach ($file in $attempted) {
+                try {
+                    Copy-Item -LiteralPath (Join-Path $DestinationDir (".$file.old")) -Destination (Join-Path $DestinationDir $file) -Force
+                } catch {
+                    $recoveryErrors.Add("${file}: $($_.Exception.Message)")
+                }
+            }
+            if ($recoveryErrors.Count) {
+                throw "update failed: $($updateError.Exception.Message); recovery incomplete, backups retained in ${DestinationDir}: $($recoveryErrors -join '; ')"
+            }
+            $removeBackups = $true
+            throw $updateError
+        }
+    } finally {
+        foreach ($file in $Names) {
+            Remove-Item -LiteralPath (Join-Path $DestinationDir (".$file.new")) -Force -ErrorAction SilentlyContinue
+            if ($removeBackups) {
+                Remove-Item -LiteralPath (Join-Path $DestinationDir (".$file.old")) -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Get-KeyportUpdateLock([string]$Directory) {
+    try {
+        return [IO.File]::Open((Join-Path $Directory '.update.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    } catch {
+        throw "cannot acquire update lock (another update may be running): $($_.Exception.Message)"
+    }
+}
+
+$updateLock = $null
+
 try {
     if (-not (Test-Path -LiteralPath $BinDir -PathType Container)) {
         throw "Keyport client is not installed in $InstallDir"
     }
+
+    $updateLock = Get-KeyportUpdateLock $InstallDir
 
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('keyport-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($tmp) | Out-Null
@@ -40,38 +105,7 @@ try {
             }
         }
 
-        $newFiles = @{}
-        $backupFiles = @{}
-        foreach ($file in $Files) {
-            $new = Join-Path $BinDir (".$file.new")
-            $backup = Join-Path $BinDir (".$file.old")
-            Remove-Item -LiteralPath $new,$backup -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath (Join-Path $tmp $file) -Destination $new
-            $newFiles[$file] = $new
-            $backupFiles[$file] = $backup
-        }
-
-        $replaced = New-Object System.Collections.Generic.List[string]
-        try {
-            foreach ($file in $Files) {
-                $destination = Join-Path $BinDir $file
-                Copy-Item -LiteralPath $destination -Destination $backupFiles[$file]
-                Move-Item -LiteralPath $newFiles[$file] -Destination $destination -Force
-                $replaced.Add($file)
-            }
-        } catch {
-            foreach ($file in $replaced) {
-                $destination = Join-Path $BinDir $file
-                if (Test-Path -LiteralPath $backupFiles[$file] -PathType Leaf) {
-                    Copy-Item -LiteralPath $backupFiles[$file] -Destination $destination -Force
-                }
-            }
-            throw
-        } finally {
-            foreach ($file in $Files) {
-                Remove-Item -LiteralPath $newFiles[$file],$backupFiles[$file] -Force -ErrorAction SilentlyContinue
-            }
-        }
+        Install-KeyportFiles $tmp $BinDir $Files
 
         Info 'update complete'
     } finally {
@@ -81,4 +115,6 @@ try {
     }
 } catch {
     Fail $_.Exception.Message
+} finally {
+    if ($null -ne $updateLock) { $updateLock.Dispose() }
 }

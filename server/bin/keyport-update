@@ -14,6 +14,9 @@ CONFIG_FILE="${INSTALL_DIR}/keyport.conf"
 
 SERVICE="keyport.service"
 HEALTH_URL="http://127.0.0.1:8000/health"
+READY_URL="http://127.0.0.1:8000/ready"
+UPDATE_STARTED=0
+UPDATE_COMMITTED=0
 
 die() {
     echo "keyport update: $*" >&2
@@ -30,7 +33,21 @@ cleanup() {
     fi
 }
 
-trap cleanup EXIT
+finish() {
+    local status=$?
+    trap - EXIT
+    trap '' INT TERM
+    if [[ "${UPDATE_STARTED}" -eq 1 && "${UPDATE_COMMITTED}" -eq 0 ]]; then
+        rollback_application || info "WARNING: rollback incomplete; preserve .app.old and .bin.old for recovery"
+        status=1
+    fi
+    cleanup
+    exit "${status}"
+}
+
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 #
 # Preconditions
@@ -40,13 +57,27 @@ if [[ "${EUID}" -ne 0 ]]; then
     die "must be run as root"
 fi
 
-for command in curl tar python3 sha256sum systemctl mariadb; do
+for command in curl tar python3 sha256sum systemctl mariadb flock; do
     command -v "${command}" >/dev/null 2>&1 \
         || die "required command not found: ${command}"
 done
 
 [[ -d "${INSTALL_DIR}" ]] \
     || die "Keyport is not installed in ${INSTALL_DIR}"
+
+# Keep this file in place: unlinking a held lock allows a second lock inode.
+exec 9>"${INSTALL_DIR}/.update.lock"
+flock -n 9 || die "another update is already running"
+
+APP_NEW="${INSTALL_DIR}/.app.new"
+BIN_NEW="${INSTALL_DIR}/.bin.new"
+APP_OLD="${INSTALL_DIR}/.app.old"
+BIN_OLD="${INSTALL_DIR}/.bin.old"
+
+# A previous interrupted deployment may still need these recovery copies.
+for backup in "${APP_OLD}" "${BIN_OLD}"; do
+    [[ ! -e "${backup}" ]] || die "recovery required: backup exists at ${backup}"
+done
 
 [[ -d "${APP_DIR}" ]] \
     || die "application directory not found: ${APP_DIR}"
@@ -326,17 +357,7 @@ fi
 # installed application.
 #
 
-APP_NEW="${INSTALL_DIR}/.app.new"
-BIN_NEW="${INSTALL_DIR}/.bin.new"
-
-APP_OLD="${INSTALL_DIR}/.app.old"
-BIN_OLD="${INSTALL_DIR}/.bin.old"
-
-rm -rf \
-    "${APP_NEW}" \
-    "${BIN_NEW}" \
-    "${APP_OLD}" \
-    "${BIN_OLD}"
+rm -rf "${APP_NEW}" "${BIN_NEW}"
 
 cp -a "${STAGED_APP}" "${APP_NEW}"
 cp -a "${STAGED_BIN}" "${BIN_NEW}"
@@ -367,30 +388,59 @@ find "${BIN_NEW}" \
 # Rollback helper.
 #
 
+wait_for_endpoint() {
+    local url="$1" attempt
+    for attempt in 1 2 3 4 5; do
+        if curl --fail --silent --max-time 5 "${url}" >/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 rollback_application() {
     info "rolling back application files"
+    local failed=0 old destination
 
-    systemctl stop "${SERVICE}" >/dev/null 2>&1 || true
-
-    rm -rf "${APP_DIR}" "${BIN_DIR}"
-
-    if [[ -d "${APP_OLD}" ]]; then
-        mv "${APP_OLD}" "${APP_DIR}"
+    if ! systemctl stop "${SERVICE}"; then
+        info "WARNING: cannot stop service; recovery copies retained"
+        return 1
     fi
 
-    if [[ -d "${BIN_OLD}" ]]; then
-        mv "${BIN_OLD}" "${BIN_DIR}"
-    fi
-
-    if systemctl start "${SERVICE}" >/dev/null 2>&1; then
-        if systemctl is-active --quiet "${SERVICE}"; then
-            info "previous application restored and started"
-        else
-            info "WARNING: previous application restored but service is not active"
+    # A rename may have succeeded just before a signal arrived. Inspect the
+    # backups themselves rather than flags set after each rename. Never remove
+    # a production tree whose original was not backed up.
+    for old in "${APP_OLD}" "${BIN_OLD}"; do
+        if [[ -d "${old}" ]]; then
+            if [[ "${old}" == "${APP_OLD}" ]]; then
+                destination="${APP_DIR}"
+            else
+                destination="${BIN_DIR}"
+            fi
+            if ! rm -rf "${destination}" || ! cp -a "${old}" "${destination}"; then
+                info "WARNING: cannot restore ${destination}; backup retained at ${old}"
+                failed=1
+            fi
         fi
-    else
-        info "WARNING: previous application restored but failed to start"
+    done
+
+    if [[ "${failed}" -ne 0 ]]; then
+        return 1
     fi
+    if ! systemctl start "${SERVICE}" || ! systemctl is-active --quiet "${SERVICE}"; then
+        info "WARNING: previous files restored but service failed to start; backups retained"
+        return 1
+    fi
+
+    # The previous release may predate /ready. Retain recovery copies until
+    # its process has actually begun serving requests.
+    if ! wait_for_endpoint "${HEALTH_URL}"; then
+        info "WARNING: previous application failed health check; backups retained"
+        return 1
+    fi
+    rm -rf "${APP_OLD}" "${BIN_OLD}" || return 1
+    info "previous application restored and started"
 }
 
 #
@@ -398,6 +448,9 @@ rollback_application() {
 #
 
 info "deploying application"
+
+UPDATE_STARTED=1
+systemctl stop "${SERVICE}"
 
 mv "${APP_DIR}" "${APP_OLD}"
 mv "${BIN_DIR}" "${BIN_OLD}"
@@ -412,41 +465,21 @@ mv "${BIN_NEW}" "${BIN_DIR}"
 info "restarting ${SERVICE}"
 
 if ! systemctl restart "${SERVICE}"; then
-    rollback_application
     die "update failed during service restart"
 fi
 
 if ! systemctl is-active --quiet "${SERVICE}"; then
-    rollback_application
     die "updated service is not active"
 fi
 
 #
-# Health check.
+# Readiness check.
 #
 
-info "checking application health"
+info "checking application readiness"
 
-HEALTH_OK=0
-
-for attempt in 1 2 3 4 5; do
-    if curl \
-        --fail \
-        --silent \
-        --max-time 5 \
-        "${HEALTH_URL}" \
-        >/dev/null
-    then
-        HEALTH_OK=1
-        break
-    fi
-
-    sleep 1
-done
-
-if [[ "${HEALTH_OK}" -ne 1 ]]; then
-    rollback_application
-    die "updated application failed health check"
+if ! wait_for_endpoint "${READY_URL}"; then
+    die "updated application failed readiness check"
 fi
 
 #
@@ -460,6 +493,9 @@ ln -sfn "${INSTALL_DIR}/bin/keyport-update" /usr/local/sbin/keyport-update
 # Deployment succeeded. Old application trees are no longer needed.
 #
 
+# After this point the new deployment is accepted. Cleanup failure must not
+# trigger a rollback after one of the backups has already been removed.
+UPDATE_COMMITTED=1
 rm -rf "${APP_OLD}" "${BIN_OLD}"
 
 info "update complete"

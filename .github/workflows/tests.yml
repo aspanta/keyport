@@ -1,0 +1,33 @@
+name: Regression tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tests/requirements.txt
+      - run: python -m pytest -q tests/test_api.py tests/test_server_update.py
+      - name: Shell syntax
+        run: |
+          bash -n server/bin/keyport-update
+          bash -n clients/debian/keyport-client-install
+          bash -n clients/debian/bin/keyport-client-update
+      - name: Fail2ban filter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fail2ban
+          python -m pytest -q tests/test_fail2ban.py
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 recovery tests
+        shell: powershell
+        run: ./tests/test_windows_update.ps1
