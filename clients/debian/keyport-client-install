@@ -4,6 +4,7 @@ set -euo pipefail
 
 
 INSTALL_DIR="/opt/keyport-client"
+UPDATE_LOCK_HELD=0
 CONFIG_FILE="${INSTALL_DIR}/keyport-client.conf"
 
 
@@ -26,6 +27,12 @@ info() {
 cleanup() {
     if [[ -n "${TMPDIR_KEYPORT:-}" && -d "${TMPDIR_KEYPORT}" ]]; then
         rm -rf "${TMPDIR_KEYPORT}"
+    fi
+    # Last filesystem action: both locks remain held until process exit.
+    # The directory lock prevents a new updater from opening another lock
+    # inode between this unlink and exit. Never remove another owner's file.
+    if [[ "${UPDATE_LOCK_HELD}" -eq 1 ]]; then
+        rm -f "${INSTALL_DIR}/.update.lock"
     fi
 }
 
@@ -73,8 +80,13 @@ finish() {
 
 acquire_update_lock() {
     mkdir -p "${INSTALL_DIR}" "${BIN_DIR}"
-    exec 9>"${INSTALL_DIR}/.update.lock"
+    # The directory inode stays stable while the visible lock file is removed.
+    # The file lock also coordinates with previously installed updaters.
+    exec 9<"${INSTALL_DIR}"
     flock -n 9 || die "another client install/update is running"
+    exec 8>"${INSTALL_DIR}/.update.lock"
+    flock -n 8 || die "another client install/update is running"
+    UPDATE_LOCK_HELD=1
     [[ ! -e "${BACKUP_DIR}" ]] || die "recovery required: ${BACKUP_DIR} exists"
     # Only the lock owner may clean staged files.
     trap finish EXIT
@@ -110,6 +122,8 @@ install_client_files() {
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ "${EUID}" -ne 0 ]]; then
     die "must be run as root"

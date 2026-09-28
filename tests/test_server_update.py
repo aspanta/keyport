@@ -4,20 +4,35 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import tarfile
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIM = r'''
-import json, os, pathlib, shutil, signal, subprocess, sys
+import json, os, pathlib, shutil, signal, subprocess, sys, time
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 root = pathlib.Path(os.environ['UPDATE_TEST_ROOT'])
 mode = os.environ.get('UPDATE_TEST_MODE', '')
 with (root / 'commands').open('a') as log:
     log.write(name + ' ' + ' '.join(args) + '\n')
+def pause():
+    (root / 'paused').touch()
+    deadline = time.monotonic() + 15
+    while not (root / 'release').exists():
+        if time.monotonic() > deadline: raise RuntimeError('test release timeout')
+        time.sleep(0.02)
+
+if name == 'rm':
+    code = subprocess.run(['/bin/rm', *args]).returncode
+    if mode == 'pause_cleanup' and any(a.endswith('/.update.lock') for a in args):
+        pause()
+    sys.exit(code)
 if name == 'curl':
+    if mode == 'pause' and args[-1].endswith('/commits/main'):
+        pause()
     if args[-1].endswith('/commits/main'):
         print(json.dumps({'sha': 'a' * 40}))
     elif '--output' in args:
@@ -74,7 +89,7 @@ def installation(tmp_path):
         archive.add(ROOT / 'VERSION', arcname='keyport/VERSION')
     shims = tmp_path / 'shims'
     shims.mkdir()
-    for name in ('curl', 'mariadb', 'systemctl', 'mv', 'cp', 'chown', 'sleep'):
+    for name in ('curl', 'mariadb', 'systemctl', 'mv', 'cp', 'chown', 'sleep', 'rm'):
         target = shims / name
         target.write_text(f'#!{sys.executable}\n' + SHIM)
         target.chmod(0o755)
@@ -104,7 +119,9 @@ def assert_original(install):
 
 def test_success(installation):
     root, install, _, _ = installation
+    (install / '.update.lock').write_text('stale file from previous updater')
     result = run(installation)
+    assert not (install / '.update.lock').exists()
     assert result.returncode == 0, result.stdout + result.stderr
     assert (install / 'app/app.py').is_file()
     import json
@@ -119,6 +136,7 @@ def test_failure_restores_original(installation, mode):
     result = run(installation, mode)
     assert result.returncode != 0
     assert_original(installation[1])
+    assert not (installation[1] / '.update.lock').exists()
 
 
 @pytest.mark.parametrize('mode', ['restore4', 'rollback_start', 'rollback_health'])
@@ -141,4 +159,27 @@ def test_parallel_update_rejected(installation):
         result = run(installation)
     assert result.returncode != 0
     assert 'another update is already running' in result.stderr
+    assert (install / '.update.lock').exists(), 'must not unlink the legacy owner lock'
     assert_original(install)
+
+
+@pytest.mark.parametrize('mode', ['pause', 'pause_cleanup'])
+def test_parallel_updaters_during_work_and_lock_removal(installation, mode):
+    root, install, runner, env = installation
+    first = subprocess.Popen(['bash', str(runner)], env=dict(env, UPDATE_TEST_MODE=mode), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 15
+        while not (root / 'paused').exists():
+            assert first.poll() is None, 'first updater exited before synchronization point'
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        assert (install / '.update.lock').exists() == (mode == 'pause')
+        second = subprocess.run(['bash', str(runner)], env=env, capture_output=True, text=True, timeout=10)
+        assert second.returncode != 0
+        assert 'another update is already running' in second.stderr
+        assert (install / '.update.lock').exists() == (mode == 'pause')
+    finally:
+        (root / 'release').touch()
+        output, errors = first.communicate(timeout=30)
+    assert first.returncode == 0, output + errors
+    assert not (install / '.update.lock').exists()

@@ -275,8 +275,15 @@ For manual recovery, stop the service and ensure no updater is running. Preserve
 the remaining backup directories before changing files. Restore each available
 backup to its corresponding `app` or `bin` directory, keeping an intact copy
 until the restored service and API have been verified. Remove the `.old`
-directories only after successful recovery. Do not delete `.update.lock` to
-bypass a running update; an unused lock file can remain in place.
+directories only after successful recovery.
+
+The updater holds an exclusive lock on the installation directory as well as
+`.update.lock` (the latter coordinates with older updaters). It removes the
+file as its last cleanup action, keeping the directory locked until process
+exit so another updater cannot bypass the lock during removal. Normal success,
+handled errors, and handled `INT`/`TERM` signals clean up the file. `SIGKILL` or
+power loss can leave a stale file, which the next completed run reuses and
+removes. Do not manually delete a lock held by another process.
 
 Database migrations are not automatically rolled back.
 

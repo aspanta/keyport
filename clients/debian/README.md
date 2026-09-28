@@ -399,9 +399,13 @@ updater running, preserve this directory, restore the backed-up files to `bin/`
 and `build-info.json` to the installation root, and remove destinations marked
 with `.absent`. Verify recovery before removing the backup directory.
 
-The installer and updater share an exclusive `flock`. On Debian, `.update.lock`
-is intentionally retained as a reusable lock file; its existence is not a held
-lock. Do not unlink it to bypass an active update.
+The installer and updater share an exclusive `flock` on the installation
+directory and also lock `.update.lock` for compatibility with older updaters.
+The file is removed on successful completion, handled errors, and handled
+`INT`/`TERM` signals, while the directory remains locked until process exit.
+This prevents another process from bypassing the lock during file removal.
+A stale file from an older updater or `SIGKILL`/power loss is safely reused and
+removed by the next completed run. Never unlink an active lock manually.
 
 For the first upgrade from an older updater that does not install metadata,
 rerun the current client installer. It preserves the existing configuration.
