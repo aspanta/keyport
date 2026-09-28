@@ -221,6 +221,40 @@ def health():
     return jsonify(status="ok"), 200
 
 
+@app.get("/ready")
+def ready():
+    # This check is for the local updater, never for proxied clients.
+    if (
+        request.remote_addr not in ("127.0.0.1", "::1")
+        or "X-Keyport-Source-IP" in request.headers
+    ):
+        return error("not_found", 404)
+
+    db = None
+    try:
+        db = get_db()
+        with db.cursor() as cursor:
+            # Validate the columns used by the API without reading key material.
+            for query in (
+                "SELECT id, name, state, lock_on_source_mismatch FROM scopes LIMIT 0",
+                "SELECT scope_id, api_key_hash FROM credentials LIMIT 0",
+                "SELECT scope_id, source FROM sources LIMIT 0",
+                "SELECT scope_id, keyname, keyvalue FROM `keys` LIMIT 0",
+                "SELECT scope_id, source, method, keyname, result FROM audit LIMIT 0",
+            ):
+                cursor.execute(query)
+        return jsonify(status="ready"), 200
+    except Exception:
+        app.logger.exception("Readiness check failed")
+        return error("service_unavailable", 503)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
 @app.get("/key/<scope_name>")
 def key_list(scope_name):
     if not NAME_RE.fullmatch(scope_name):
@@ -315,7 +349,7 @@ def key(scope_name, keyname):
             db.commit()
             return auth_error
 
-        if request.method == "GET":
+        if request.method in ("GET", "HEAD"):
             with db.cursor() as cursor:
                 cursor.execute(
                     """
@@ -455,6 +489,10 @@ def key(scope_name, keyname):
 
             db.commit()
             return "", 204
+
+        if request.method != "DELETE":
+            db.rollback()
+            return error("method_not_allowed", 405)
 
         with db.cursor() as cursor:
             cursor.execute(

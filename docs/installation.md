@@ -26,7 +26,7 @@ Git working copy.
 The reference deployment uses Python 3, Flask, Gunicorn, PyMySQL, MariaDB,
 nginx, systemd, and Fail2ban.
 
-The server updater additionally requires `curl`, `tar`, and `sha256sum`.
+The server updater additionally requires `curl`, `tar`, `sha256sum`, and `flock` (from `util-linux`).
 
 ## Service account
 
@@ -129,16 +129,14 @@ validate nginx configuration before reloading it.
 
 ## Fail2ban
 
-Install `server/config/fail2ban/filter.conf` under:
+Install the filter and jail with these exact names (`filter = keyport`
+requires `filter.d/keyport.conf`):
 
-```text
-/etc/fail2ban/filter.d/
-```
-
-and `server/config/fail2ban/jail.conf` under:
-
-```text
-/etc/fail2ban/jail.d/
+```bash
+sudo install -m 0644 server/config/fail2ban/filter.conf /etc/fail2ban/filter.d/keyport.conf
+sudo install -m 0644 server/config/fail2ban/jail.conf /etc/fail2ban/jail.d/keyport.conf
+sudo fail2ban-regex /var/log/nginx/access.log /etc/fail2ban/filter.d/keyport.conf
+sudo fail2ban-client -t
 ```
 
 The reference jail watches nginx access logs for repeated 401 and 429
@@ -158,7 +156,11 @@ Save the displayed API key securely on the client.
 ## Verification
 
 Verify the local application health endpoint and then the same endpoint through
-nginx/TLS.
+nginx/TLS. `/health` checks process liveness only. The local updater uses
+`http://127.0.0.1:8000/ready` to check database connectivity and the columns
+required by the API. `/ready` rejects non-loopback or proxied requests and is
+not exposed by the reference nginx configuration. It does not read key values
+or prove write permissions, audit durability, or full API correctness.
 
 Use a temporary scope and credential to test missing and invalid credentials,
 an allowed source, an unexpected source, a missing key, key listing,
@@ -240,9 +242,9 @@ The updater:
 5. verifies checksums of previously applied migrations;
 6. applies pending migrations in lexical order;
 7. stages complete replacement `app/` and `bin/` trees;
-8. switches the deployed application trees;
+8. stops the service and switches the deployed application trees;
 9. restarts `keyport.service`;
-10. verifies the local `/health` endpoint;
+10. verifies the local `/ready` endpoint;
 11. keeps the updater as part of the managed `bin/` tree; rollback restores the previous updater together with that tree.
 
 Because complete `app/` and `bin/` trees are replaced, files added to the
@@ -254,9 +256,23 @@ are removed from the deployed trees.
 Before switching application files, the updater preserves the previous
 `app/` and `bin/` trees.
 
-If the new service fails to restart or fails the health check, the updater
-restores the previous application trees and attempts to start the previous
-application.
+The updater holds an exclusive lock for the entire update, including migrations.
+After deployment starts, errors and handled `INT`/`TERM` signals trigger an
+attempt to restore the previous application and start it. Each original tree
+is restored only if its backup exists, including failures between renames.
+Readiness failure also triggers this recovery.
+
+If restoration or startup fails, `.app.old` and `.bin.old` are retained under
+`/opt/keyport`. A subsequent update refuses to proceed while either backup
+exists. `SIGKILL`, power loss, and filesystem failures may require manual
+recovery; shell traps cannot guarantee recovery in these cases.
+
+For manual recovery, stop the service and ensure no updater is running. Preserve
+the remaining backup directories before changing files. Restore each available
+backup to its corresponding `app` or `bin` directory, keeping an intact copy
+until the restored service and API have been verified. Remove the `.old`
+directories only after successful recovery. Do not delete `.update.lock` to
+bypass a running update; an unused lock file can remain in place.
 
 Database migrations are not automatically rolled back.
 

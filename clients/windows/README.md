@@ -57,6 +57,14 @@ keyport-client-update
 The updater replaces only files under `bin` and never modifies
 `keyport-client.conf`.
 
+Only one updater may run at a time. All replacement files and backups are
+prepared before installation begins. If replacement fails, the updater attempts
+to restore every file whose replacement was attempted. If recovery fails or the
+process is interrupted, `.old` backups may remain in `bin`; the next update
+refuses to overwrite them. With no updater running, preserve those backups,
+restore the affected files, and verify the client before removing the backups
+and retrying. Do not delete `.update.lock` to bypass a running updater.
+
 ## Configuration
 
 The client reads:

@@ -140,10 +140,11 @@ sudo keyport-update
 
 The updater downloads the current repository snapshot, validates it, applies
 pending database migrations, replaces the deployed `app/` and `bin/` trees,
-restarts Keyport, and verifies the local health endpoint.
+restarts Keyport, and verifies local database/schema readiness.
 
-Application files are rolled back if the updated service fails to start or
-fails its health check. Database migrations are not automatically rolled back.
+The updater attempts to restore application files after deployment errors,
+including partial replacement, startup failure, or readiness failure. Recovery
+backups are retained if restoration fails. Database migrations are not automatically rolled back.
 
 Local infrastructure configuration such as `keyport.conf`, systemd, nginx,
 Fail2ban, and TLS configuration is not modified by the updater.

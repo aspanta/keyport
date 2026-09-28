@@ -100,3 +100,16 @@ The reference nginx configuration defines a `keyport_api` zone at 1 request/seco
 ## Audit
 
 Audit records contain operational metadata such as timestamp, scope reference when known, source address, HTTP method, key name when applicable, and result. They do not contain API keys or stored key values.
+
+## HEAD requests
+
+`HEAD /key/{scope}/{keyname}` performs the same authorization, lookup, and
+audit as `GET`, and returns the same status without a response body. It never
+deletes or changes the stored value. Only `DELETE` removes a key.
+
+## Local readiness
+
+`GET /ready` is reserved for direct loopback requests from the server updater.
+It returns 200 when database connectivity and the API's required columns are
+available, or 503 otherwise. Proxied and non-loopback requests receive 404.
+The public `/health` endpoint continues to check process liveness only.
