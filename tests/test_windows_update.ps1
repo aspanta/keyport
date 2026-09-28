@@ -76,15 +76,55 @@ try {
         }
         Write-Output "PASS $case"
     }
+    # Root-level metadata must follow the same recovery decision as binaries.
+    foreach ($legacy in @($false, $true)) {
+        foreach ($case in @('success', 'before2', 'after5')) {
+            $script:mode = $case; $script:moveCount = 0
+            $caseRoot = Join-Path $testRoot ("metadata-$legacy-$case")
+            $source = Join-Path $caseRoot 'source'; $destination = Join-Path $caseRoot 'bin'
+            [IO.Directory]::CreateDirectory($source) | Out-Null
+            [IO.Directory]::CreateDirectory($destination) | Out-Null
+            foreach ($name in $names) {
+                [IO.File]::WriteAllText((Join-Path $source $name), 'new')
+                [IO.File]::WriteAllText((Join-Path $destination $name), 'old')
+            }
+            $meta = Join-Path $caseRoot 'build-info.json'
+            $metaSource = Join-Path $source 'build-info.json'
+            [IO.File]::WriteAllText($metaSource, 'new-metadata')
+            if (-not $legacy) { [IO.File]::WriteAllText($meta, 'old-metadata') }
+            $failure = $null
+            try { Install-KeyportFiles $source $destination $names $metaSource $meta } catch { $failure = $_ }
+            if ($case -eq 'success') {
+                Assert ($null -eq $failure) "metadata success: $failure"
+                Assert ([IO.File]::ReadAllText($meta) -eq 'new-metadata') 'metadata installed in root'
+            } else {
+                Assert ($null -ne $failure) 'metadata failure injected'
+                foreach ($name in $names) { Assert ([IO.File]::ReadAllText((Join-Path $destination $name)) -eq 'old') 'code restored' }
+                if ($legacy) { Assert (-not (Test-Path $meta)) 'legacy metadata absence restored' }
+                else { Assert ([IO.File]::ReadAllText($meta) -eq 'old-metadata') 'metadata restored' }
+            }
+            Assert (-not (Test-Path (Join-Path $destination 'build-info.json'))) 'metadata is not in bin'
+            Write-Output "PASS metadata legacy=$legacy case=$case"
+        }
+    }
+
+    # Use a second OS process, not just two handles in this process.
+    $childScript = Join-Path $testRoot 'lock-child.ps1'
+    $lockFunction = $ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-KeyportUpdateLock'}, $true)
+    $childCode = 'param([string]$Directory)' + "`n" + $lockFunction.Extent.Text + "`n" + 'try { $lock = Get-KeyportUpdateLock $Directory; $lock.Dispose(); exit 0 } catch { exit 9 }'
+    [IO.File]::WriteAllText($childScript, $childCode)
+    # A stale file left by the previous updater must not block a new run.
+    [IO.File]::WriteAllText((Join-Path $testRoot '.update.lock'), '')
     $lock = Get-KeyportUpdateLock $testRoot
     try {
-        $failure = $null
-        try { $second = Get-KeyportUpdateLock $testRoot; $second.Dispose() } catch { $failure = $_ }
-        Assert ($null -ne $failure) 'parallel updater lock rejected'
+        $child = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $childScript + '"'),('"' + $testRoot + '"')) -Wait -PassThru
+        Assert ($child.ExitCode -eq 9) 'second process rejected while lock is held'
     } finally { $lock.Dispose() }
-    $lock = Get-KeyportUpdateLock $testRoot
-    $lock.Dispose()
-    Write-Output 'PASS exclusive lock and release'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testRoot '.update.lock'))) 'lock file removed after disposal'
+    $child = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $childScript + '"'),('"' + $testRoot + '"')) -Wait -PassThru
+    Assert ($child.ExitCode -eq 0) 'next process acquires released lock'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testRoot '.update.lock'))) 'child cleans lock file'
+    Write-Output 'PASS cross-process lock, stale file, cleanup and release'
 } finally {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -26,6 +26,31 @@ keyport
 
 Use `keyport --help`, `keyport scope --help`, `keyport source --help`, and `keyport credential --help` for command-specific help.
 
+## Help and version
+
+All installed commands provide `-h` / `--help` and `-v` / `--version`:
+
+```bash
+keyport -v
+keyport-update -v
+keyport-client -v
+keyport-client-update -v
+```
+
+The client commands also support these options on Windows. Example output:
+
+```text
+keyport 1.2.0 (aaaaaaaaaaaa)
+```
+
+The short commit above is illustrative. Version output describes the local
+installation and requires no network, database connection, or secret
+configuration. Missing/invalid metadata prints `unknown (unknown)`.
+Informational options are handled before update privilege checks and locking;
+existing filesystem permissions still apply. Updaters reject unknown arguments
+instead of starting an update. Running an updater without arguments performs
+its normal update.
+
 ## Scopes
 
 ```bash

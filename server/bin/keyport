@@ -3,8 +3,10 @@
 import argparse
 import hashlib
 import ipaddress
+import json
 import os
 import re
+from pathlib import Path
 import secrets
 import sys
 
@@ -13,6 +15,31 @@ import pymysql
 
 CONFIG_FILE = "/opt/keyport/keyport.conf"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+BUILD_INFO_FILE = Path(__file__).resolve().parents[1] / "app" / "build-info.json"
+
+
+def load_build_info():
+    """Read installed metadata only; never infer a deployed revision from main."""
+    try:
+        info = json.loads(BUILD_INFO_FILE.read_text(encoding="utf-8"))
+        if (
+            not isinstance(info, dict)
+            or not isinstance(info.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", info["version"])
+            or not isinstance(info.get("commit"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", info["commit"])
+        ):
+            raise ValueError("invalid build metadata")
+        return {"version": info["version"], "commit": info["commit"]}
+    except (OSError, ValueError, UnicodeError):
+        return {"version": "unknown", "commit": "unknown"}
+
+
+def version_text(program):
+    info = load_build_info()
+    return f"{program} {info['version']} ({info['commit'][:12]})"
 
 
 def die(message, code=1):
@@ -552,6 +579,11 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="keyport",
         description="Keyport administration CLI",
+    )
+
+    parser.add_argument(
+        "-v", "--version", action="version", version=version_text("keyport"),
+        help="show version information and exit",
     )
 
     top = parser.add_subparsers(dest="command", required=True)

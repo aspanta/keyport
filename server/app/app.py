@@ -1,7 +1,9 @@
 import hashlib
 import ipaddress
+import json
 import os
 import re
+from pathlib import Path
 
 import pymysql
 from flask import Flask, jsonify, request
@@ -12,6 +14,30 @@ app = Flask(__name__)
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_KEY_LENGTH = 4096
 MAX_KEYS_PER_SCOPE = 1000
+
+
+BUILD_INFO_FILE = Path(__file__).resolve().with_name("build-info.json")
+
+
+def load_build_info():
+    """Read installed metadata only; never infer a deployed revision from main."""
+    try:
+        info = json.loads(BUILD_INFO_FILE.read_text(encoding="utf-8"))
+        if (
+            not isinstance(info, dict)
+            or not isinstance(info.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", info["version"])
+            or not isinstance(info.get("commit"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", info["commit"])
+        ):
+            raise ValueError("invalid build metadata")
+        return {"version": info["version"], "commit": info["commit"]}
+    except (OSError, ValueError, UnicodeError):
+        return {"version": "unknown", "commit": "unknown"}
+
+
+# Captured once so running workers report the code they loaded.
+BUILD_INFO = load_build_info()
 
 
 def get_db():
@@ -218,7 +244,7 @@ def authorize(db, scope_name, keyname, source_ip):
 
 @app.get("/health")
 def health():
-    return jsonify(status="ok"), 200
+    return jsonify(status="ok", **BUILD_INFO), 200
 
 
 @app.get("/ready")
@@ -243,7 +269,7 @@ def ready():
                 "SELECT scope_id, source, method, keyname, result FROM audit LIMIT 0",
             ):
                 cursor.execute(query)
-        return jsonify(status="ready"), 200
+        return jsonify(status="ready", **BUILD_INFO), 200
     except Exception:
         app.logger.exception("Readiness check failed")
         return error("service_unavailable", 503)

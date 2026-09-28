@@ -2,12 +2,42 @@
 
 set -euo pipefail
 
-BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian/bin"
+
+# Informational options must precede root checks, locks, and network access.
+case "$#:$*" in
+    0:) ;;
+    1:-h|1:--help)
+        cat <<'HELP'
+usage: keyport-client-update [-h] [-v]
+
+Update the installed keyport-client from main.
+
+options:
+  -h, --help     show this help message and exit
+  -v, --version  show version information and exit
+HELP
+        exit 0
+        ;;
+    1:-v|1:--version)
+        python3 - "/opt/keyport-client/build-info.json" <<'PY_VERSION'
+import json, re, sys
+from pathlib import Path
+try:
+    info = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    version, commit = info["version"], info["commit"]
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("invalid metadata")
+except (OSError, ValueError, TypeError, KeyError, UnicodeError):
+    version, commit = "unknown", "unknown"
+print(f"keyport-client-update {version} ({commit[:12]})")
+PY_VERSION
+        exit $?
+        ;;
+    *) echo "keyport-client-update: unknown arguments; use --help" >&2; exit 2 ;;
+esac
 
 INSTALL_DIR="/opt/keyport-client"
 
-CLIENT_URL="${BASE_URL}/keyport-client"
-UPDATE_URL="${BASE_URL}/keyport-client-update"
 
 BIN_DIR="${INSTALL_DIR}/bin"
 CLIENT_FILE="${BIN_DIR}/keyport-client"
@@ -29,6 +59,86 @@ cleanup() {
     if [[ -n "${TMPDIR_KEYPORT:-}" && -d "${TMPDIR_KEYPORT}" ]]; then
         rm -rf "${TMPDIR_KEYPORT}"
     fi
+}
+
+# Binary files and root-level metadata form one recoverable update.
+BACKUP_DIR="${INSTALL_DIR}/.update-backup"
+TX_STARTED=0
+TX_COMMITTED=0
+
+target_path() {
+    if [[ "$1" == build-info.json ]]; then
+        printf '%s/build-info.json' "${INSTALL_DIR}"
+    else
+        printf '%s/%s' "${BIN_DIR}" "$1"
+    fi
+}
+
+finish() {
+    local status=$? name destination failed=0
+    trap - EXIT
+    trap '' INT TERM
+    if [[ "${TX_STARTED}" -eq 1 && "${TX_COMMITTED}" -eq 0 ]]; then
+        for name in keyport-client keyport-client-update build-info.json; do
+            destination="$(target_path "${name}")"
+            if [[ -f "${BACKUP_DIR}/${name}.absent" ]]; then
+                rm -f "${destination}" || failed=1
+            elif [[ -f "${BACKUP_DIR}/${name}" ]]; then
+                cp -a "${BACKUP_DIR}/${name}" "${destination}" || failed=1
+            else
+                failed=1
+            fi
+        done
+        if [[ "${failed}" -eq 0 ]]; then
+            rm -rf "${BACKUP_DIR}"
+        else
+            echo "keyport-client: recovery incomplete; backups retained at ${BACKUP_DIR}" >&2
+        fi
+        status=1
+    fi
+    for name in keyport-client keyport-client-update build-info.json; do
+        rm -f "$(target_path "${name}").new"
+    done
+    cleanup
+    exit "${status}"
+}
+
+acquire_update_lock() {
+    mkdir -p "${INSTALL_DIR}" "${BIN_DIR}"
+    exec 9>"${INSTALL_DIR}/.update.lock"
+    flock -n 9 || die "another client install/update is running"
+    [[ ! -e "${BACKUP_DIR}" ]] || die "recovery required: ${BACKUP_DIR} exists"
+    # Only the lock owner may clean staged files.
+    trap finish EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+}
+
+install_client_files() {
+    local name source destination mode
+    mkdir "${BACKUP_DIR}"
+    chmod 0700 "${BACKUP_DIR}"
+    for name in keyport-client keyport-client-update build-info.json; do
+        source="${TMPDIR_KEYPORT}/${name}"
+        destination="$(target_path "${name}")"
+        mode=0700
+        [[ "${name}" != build-info.json ]] || mode=0644
+        install -o root -g root -m "${mode}" "${source}" "${destination}.new"
+        if [[ -e "${destination}" ]]; then
+            cp -a "${destination}" "${BACKUP_DIR}/${name}"
+        else
+            touch "${BACKUP_DIR}/${name}.absent"
+        fi
+    done
+    TX_STARTED=1
+    for name in keyport-client keyport-client-update build-info.json; do
+        destination="$(target_path "${name}")"
+        mv -f "${destination}.new" "${destination}"
+    done
+    ln -sfn "${CLIENT_FILE}" "${CLIENT_LINK}"
+    ln -sfn "${UPDATE_FILE}" "${UPDATE_LINK}"
+    TX_COMMITTED=1
+    rm -rf "${BACKUP_DIR}"
 }
 
 trap cleanup EXIT
@@ -59,10 +169,37 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 AESGCM.generate_key(bit_length=256)
 PY
 
+command -v flock >/dev/null 2>&1 || die "flock is required"
+acquire_update_lock
+
 TMPDIR_KEYPORT="$(mktemp -d)"
 
 CLIENT_SOURCE="${TMPDIR_KEYPORT}/keyport-client"
 UPDATE_SOURCE="${TMPDIR_KEYPORT}/keyport-client-update"
+
+
+COMMIT="$(curl -fsSL -H 'User-Agent: Keyport' "https://api.github.com/repos/aspanta/keyport/commits/main" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')" \
+    || die "cannot resolve main to a commit"
+[[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || die "invalid commit returned by GitHub"
+
+BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/${COMMIT}/clients/debian"
+CLIENT_URL="${BASE_URL}/bin/keyport-client"
+UPDATE_URL="${BASE_URL}/bin/keyport-client-update"
+CONFIG_URL="${BASE_URL}/keyport-client.conf.example"
+VERSION_SOURCE="${TMPDIR_KEYPORT}/VERSION"
+BUILD_SOURCE="${TMPDIR_KEYPORT}/build-info.json"
+curl -fsSL "https://raw.githubusercontent.com/aspanta/keyport/${COMMIT}/VERSION" -o "${VERSION_SOURCE}" \
+    || die "failed to download VERSION"
+
+python3 - "${VERSION_SOURCE}" "${COMMIT}" "${BUILD_SOURCE}" <<'PY_BUILD'
+import json, re, sys
+from pathlib import Path
+version = Path(sys.argv[1]).read_text(encoding="ascii").strip()
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
+    raise SystemExit("invalid VERSION")
+Path(sys.argv[3]).write_text(json.dumps({"version": version, "commit": sys.argv[2]}) + "\n", encoding="utf-8")
+PY_BUILD
 
 info "downloading current files from main"
 
@@ -80,33 +217,6 @@ python3 -m py_compile "${CLIENT_SOURCE}" \
 bash -n "${UPDATE_SOURCE}" \
     || die "update script validation failed"
 
-CLIENT_NEW="${BIN_DIR}/.keyport-client.new"
-UPDATE_NEW="${BIN_DIR}/.keyport-client-update.new"
-
-cleanup_new_files() {
-    rm -f "${CLIENT_NEW}" "${UPDATE_NEW}"
-}
-
-trap 'cleanup_new_files; cleanup' EXIT
-
-install \
-    -o root \
-    -g root \
-    -m 0700 \
-    "${CLIENT_SOURCE}" \
-    "${CLIENT_NEW}"
-
-install \
-    -o root \
-    -g root \
-    -m 0700 \
-    "${UPDATE_SOURCE}" \
-    "${UPDATE_NEW}"
-
-mv -f "${CLIENT_NEW}" "${CLIENT_FILE}"
-mv -f "${UPDATE_NEW}" "${UPDATE_FILE}"
-
-ln -sfn "${CLIENT_FILE}" "${CLIENT_LINK}"
-ln -sfn "${UPDATE_FILE}" "${UPDATE_LINK}"
+install_client_files
 
 info "update complete"

@@ -2,10 +2,41 @@
 
 set -euo pipefail
 
+# Informational options must precede root checks, locks, and network access.
+case "$#:$*" in
+    0:) ;;
+    1:-h|1:--help)
+        cat <<'HELP'
+usage: keyport-update [-h] [-v]
+
+Update the installed keyport from main.
+
+options:
+  -h, --help     show this help message and exit
+  -v, --version  show version information and exit
+HELP
+        exit 0
+        ;;
+    1:-v|1:--version)
+        python3 - "/opt/keyport/app/build-info.json" <<'PY_VERSION'
+import json, re, sys
+from pathlib import Path
+try:
+    info = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    version, commit = info["version"], info["commit"]
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("invalid metadata")
+except (OSError, ValueError, TypeError, KeyError, UnicodeError):
+    version, commit = "unknown", "unknown"
+print(f"keyport-update {version} ({commit[:12]})")
+PY_VERSION
+        exit $?
+        ;;
+    *) echo "keyport-update: unknown arguments; use --help" >&2; exit 2 ;;
+esac
+
 REPO="aspanta/keyport"
 BRANCH="main"
-
-ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
 
 INSTALL_DIR="/opt/keyport"
 APP_DIR="${INSTALL_DIR}/app"
@@ -135,7 +166,15 @@ mkdir -p "${SOURCE_DIR}"
 # Download current main snapshot.
 #
 
-info "downloading ${REPO} ${BRANCH}"
+info "resolving ${REPO} ${BRANCH}"
+
+COMMIT="$(curl -fsSL -H 'User-Agent: Keyport' "https://api.github.com/repos/${REPO}/commits/${BRANCH}" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')" \
+    || die "cannot resolve main to a commit"
+[[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || die "invalid commit returned by GitHub"
+
+ARCHIVE_URL="https://github.com/${REPO}/archive/${COMMIT}.tar.gz"
+info "downloading ${REPO} ${COMMIT}"
 
 curl \
     --fail \
@@ -303,6 +342,20 @@ if [[ -d "${MIGRATIONS_SOURCE}" ]]; then
     )
 fi
 
+# Metadata belongs to the downloaded revision and rolls back with app/.
+VERSION_SOURCE="${SOURCE_DIR}/VERSION"
+BUILD_SOURCE="${APP_SOURCE}/build-info.json"
+
+python3 - "${VERSION_SOURCE}" "${COMMIT}" "${BUILD_SOURCE}" <<'PY_BUILD'
+import json, re, sys
+from pathlib import Path
+version = Path(sys.argv[1]).read_text(encoding="ascii").strip()
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
+    raise SystemExit("invalid VERSION")
+Path(sys.argv[3]).write_text(json.dumps({"version": version, "commit": sys.argv[2]}) + "\n", encoding="utf-8")
+PY_BUILD
+SOURCE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${BUILD_SOURCE}")"
+
 #
 # Stage complete app/bin trees.
 #
@@ -389,10 +442,15 @@ find "${BIN_NEW}" \
 #
 
 wait_for_endpoint() {
-    local url="$1" attempt
+    local url="$1" expected_commit="${2:-}" expected_version="${3:-}" attempt body
     for attempt in 1 2 3 4 5; do
-        if curl --fail --silent --max-time 5 "${url}" >/dev/null; then
-            return 0
+        if body="$(curl --fail --silent --max-time 5 "${url}")"; then
+            if [[ -z "${expected_commit}" ]]; then
+                return 0
+            fi
+            if python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("status")=="ready" and d.get("commit")==sys.argv[1] and d.get("version")==sys.argv[2] else 1)' "${expected_commit}" "${expected_version}" <<< "${body}"; then
+                return 0
+            fi
         fi
         sleep 1
     done
@@ -478,7 +536,7 @@ fi
 
 info "checking application readiness"
 
-if ! wait_for_endpoint "${READY_URL}"; then
+if ! wait_for_endpoint "${READY_URL}" "${COMMIT}" "${SOURCE_VERSION}"; then
     die "updated application failed readiness check"
 fi
 

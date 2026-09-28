@@ -1,9 +1,9 @@
 #requires -version 5.1
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Net.Http
 
-$ConfigFile = Join-Path $env:ProgramData 'Keyport\keyport-client.conf'
+$InstallDir = Join-Path $env:ProgramData 'Keyport'
+$ConfigFile = Join-Path $InstallDir 'keyport-client.conf'
 $NamePattern = '^[a-z0-9][a-z0-9_-]{0,63}$'
 $CreateDefaultLength = 64
 $CreateMinLength = 16
@@ -73,6 +73,41 @@ function Get-Kek($Config) {
     if ($kek.Length -ne $KekLength) { throw "KEYPORT_KEK_BASE64 must decode to exactly $KekLength bytes" }
     return ,([byte[]]$kek)
 }
+
+function Show-Help {
+@'
+usage: keyport-client [-h] [-v] <command> [arguments]
+
+options:
+  -h, --help     show this help message and exit
+  -v, --version  show version information and exit
+
+commands:
+  list                         list keys in the configured scope
+  get <keyname>                retrieve and decrypt a key
+  push <keyname>               encrypt stdin and store it in Keyport
+  create <keyname> [--length N] [--push]
+                               generate a random ASCII key
+  delete <keyname>             delete a key from Keyport
+  kek generate                 generate a KEK
+'@ | Write-Output
+}
+
+function Show-Version {
+    $version = 'unknown'; $commit = 'unknown'
+    try {
+        $info = [IO.File]::ReadAllText((Join-Path $InstallDir 'build-info.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($info.version -is [string] -and $info.version -cmatch '\A[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\z' -and $info.commit -is [string] -and $info.commit -cmatch '\A[0-9a-f]{40}\z') {
+            $version = $info.version; $commit = $info.commit.Substring(0,12)
+        }
+    } catch { }
+    [Console]::Out.WriteLine("keyport-client $version ($commit)")
+}
+
+if ($args.Count -eq 0 -or ($args.Count -eq 1 -and $args[0] -in @('-h','--help'))) { Show-Help; exit 0 }
+if ($args.Count -eq 1 -and $args[0] -in @('-v','--version')) { Show-Version; exit 0 }
+
+Add-Type -AssemblyName System.Net.Http
 
 if (-not ('KeyportNative.BCrypt' -as [type])) {
 Add-Type -TypeDefinition @'
@@ -204,23 +239,8 @@ function Push-Value($Config,[string]$KeyName,[byte[]]$Plaintext) {
     if ($result.Status -ne 204) { throw "unexpected HTTP response: $($result.Status)" }
 }
 
-function Show-Help {
-@'
-usage: keyport-client <command> [arguments]
-
-commands:
-  list                         list keys in the configured scope
-  get <keyname>                retrieve and decrypt a key
-  push <keyname>               encrypt stdin and store it in Keyport
-  create <keyname> [--length N] [--push]
-                               generate a random ASCII key
-  delete <keyname>             delete a key from Keyport
-  kek generate                 generate a KEK
-'@ | Write-Output
-}
 
 try {
-    if ($args.Count -eq 0 -or $args[0] -in @('-h','--help')) { Show-Help; exit 0 }
     $command=$args[0]
     switch ($command) {
         'list' {

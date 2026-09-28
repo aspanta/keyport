@@ -25,3 +25,6 @@ venv/
 
 # Keyport client configuration
 keyport-client.conf
+
+# Generated installation metadata
+build-info.json

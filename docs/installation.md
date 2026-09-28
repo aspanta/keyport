@@ -239,7 +239,7 @@ sudo keyport-update
 
 The updater:
 
-1. downloads a snapshot of the current `main` branch;
+1. resolves `main` to a full commit SHA and downloads that immutable snapshot;
 2. validates the downloaded application, administration CLI, and updater;
 3. connects to the configured Keyport database;
 4. bootstraps migration tracking if necessary;
@@ -248,7 +248,7 @@ The updater:
 7. stages complete replacement `app/` and `bin/` trees;
 8. stops the service and switches the deployed application trees;
 9. restarts `keyport.service`;
-10. verifies the local `/ready` endpoint;
+10. verifies local `/ready` and checks that its version and SHA match the downloaded build;
 11. keeps the updater as part of the managed `bin/` tree; rollback restores the previous updater together with that tree.
 
 Because complete `app/` and `bin/` trees are replaced, files added to the
@@ -326,3 +326,33 @@ application versions no longer depend on them.
 `server/sql/schema.sql` remains the complete schema for a new installation.
 Existing installations are changed through migrations rather than by
 re-importing `schema.sql`.
+
+## Installed version metadata
+
+The release number comes from the root `VERSION` file in the same commit as
+the downloaded code. The updater writes `/opt/keyport/app/build-info.json`
+with `version` and the full 40-character `commit`. It is generated metadata,
+not a source file, and is restored with the `app/` tree during rollback.
+`keyport -v`, `keyport-update -v`, `/health`, and `/ready` read this metadata.
+CLI output abbreviates the commit to 12 characters; the API returns the full SHA.
+
+For a manual initial deployment from a clean Git checkout, generate metadata
+before copying `server/app/` into place:
+
+```bash
+python3 - <<'PY_BUILD'
+import json, subprocess
+from pathlib import Path
+if subprocess.check_output(["git", "status", "--porcelain"], text=True).strip():
+    raise SystemExit("use a clean checkout to generate deployment metadata")
+info = {"version": Path("VERSION").read_text().strip(),
+        "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
+Path("server/app/build-info.json").write_text(json.dumps(info) + "\n")
+PY_BUILD
+```
+
+Deploy the generated file with the same read permissions as the other application
+files. Without it, legacy/manual installs report `unknown`; no runtime request to
+GitHub is made to guess their version. The first run of an older installed updater
+uses its existing logic, so run the current updater directly for an upgrade that
+must include metadata immediately.
