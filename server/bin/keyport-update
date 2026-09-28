@@ -39,6 +39,7 @@ REPO="aspanta/keyport"
 BRANCH="main"
 
 INSTALL_DIR="/opt/keyport"
+UPDATE_LOCK_HELD=0
 APP_DIR="${INSTALL_DIR}/app"
 BIN_DIR="${INSTALL_DIR}/bin"
 CONFIG_FILE="${INSTALL_DIR}/keyport.conf"
@@ -61,6 +62,12 @@ info() {
 cleanup() {
     if [[ -n "${TMPDIR_KEYPORT:-}" && -d "${TMPDIR_KEYPORT}" ]]; then
         rm -rf "${TMPDIR_KEYPORT}"
+    fi
+    # Last filesystem action: both locks remain held until process exit.
+    # The directory lock prevents a new updater from opening another lock
+    # inode between this unlink and exit. Never remove another owner's file.
+    if [[ "${UPDATE_LOCK_HELD}" -eq 1 ]]; then
+        rm -f "${INSTALL_DIR}/.update.lock"
     fi
 }
 
@@ -96,9 +103,13 @@ done
 [[ -d "${INSTALL_DIR}" ]] \
     || die "Keyport is not installed in ${INSTALL_DIR}"
 
-# Keep this file in place: unlinking a held lock allows a second lock inode.
-exec 9>"${INSTALL_DIR}/.update.lock"
+# Lock the stable installation directory before opening the removable file.
+# Retain the file lock too, to coordinate with previously installed updaters.
+exec 9<"${INSTALL_DIR}"
 flock -n 9 || die "another update is already running"
+exec 8>"${INSTALL_DIR}/.update.lock"
+flock -n 8 || die "another update is already running"
+UPDATE_LOCK_HELD=1
 
 APP_NEW="${INSTALL_DIR}/.app.new"
 BIN_NEW="${INSTALL_DIR}/.bin.new"
