@@ -43,41 +43,46 @@ service.
 ## Repository layout
 
 ```text
-server/
-├── app/
-│   └── app.py
-├── bin/
-│   ├── keyport
-│   └── keyport-update
-├── config/
-├── sql/
-│   ├── migrations/
-│   └── schema.sql
-
-clients/
-├── debian/
+keyport/
+├── .github/
+│   └── workflows/
+│       └── tests.yml
+├── server/
+│   ├── app/
+│   │   └── app.py
 │   ├── bin/
-│   │   ├── keyport-client
-│   │   └── keyport-client-update
-│   ├── keyport-client-install
-│   ├── keyport-client.conf.example
-│   └── README.md
-└── windows/
-    ├── bin/
-    │   ├── keyport-client.cmd
-    │   ├── keyport-client.ps1
-    │   ├── keyport-client-update.cmd
-    │   └── keyport-client-update.ps1
-    ├── keyport-client-install.ps1
-    ├── keyport-client.conf.example
-    └── README.md
-
-docs/
-├── api.md
-├── architecture.md
-├── cli.md
-├── installation.md
-└── security.md
+│   │   ├── keyport
+│   │   └── keyport-update
+│   ├── config/
+│   └── sql/
+│       ├── migrations/
+│       └── schema.sql
+├── clients/
+│   ├── debian/
+│   │   ├── bin/
+│   │   │   ├── keyport-client
+│   │   │   └── keyport-client-update
+│   │   ├── keyport-client-install
+│   │   ├── keyport-client.conf.example
+│   │   └── README.md
+│   └── windows/
+│       ├── bin/
+│       │   ├── keyport-client.cmd
+│       │   ├── keyport-client.ps1
+│       │   ├── keyport-client-update.cmd
+│       │   └── keyport-client-update.ps1
+│       ├── keyport-client-install.ps1
+│       ├── keyport-client.conf.example
+│       └── README.md
+├── docs/
+│   ├── api.md
+│   ├── architecture.md
+│   ├── cli.md
+│   ├── installation.md
+│   └── security.md
+├── tests/
+├── VERSION
+└── README.md
 ```
 
 ## Server
@@ -162,7 +167,7 @@ The client provides:
 keyport-client
 ├── list
 ├── get <keyname>
-├── push <keyname>
+├── push [<keyname>]
 ├── create <keyname> [--length N] [--push]
 ├── delete <keyname>
 └── kek
@@ -265,3 +270,15 @@ The release comes from `VERSION`. Installers/updaters pin downloads to one
 commit and generate `build-info.json`: inside `app/` on the server, at the
 installation root for clients. Metadata rolls back with the code. Legacy
 installations without metadata report `unknown`.
+
+## Scope audit
+
+On the server, run `keyport audit <scope>` to display up to 1000 of the scope's
+most recent audit records, newest first (timestamp, then ID). Columns include
+ID, timestamp, source IP, method, key name and result; no secret values are shown.
+An unknown scope is an error. This administrative command uses the local database
+configuration; client credentials do not grant audit access. No new public API
+endpoint is exposed.
+
+Clients accept `push <keyname>` without a pipe to prompt for a hidden password,
+or `push` to prompt for both the key name and password. Piped input stays binary-safe.

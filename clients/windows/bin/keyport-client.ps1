@@ -85,12 +85,41 @@ options:
 commands:
   list                         list keys in the configured scope
   get <keyname>                retrieve and decrypt a key
-  push <keyname>               encrypt stdin and store it in Keyport
+  push [<keyname>]             encrypt stdin or prompt for a password
   create <keyname> [--length N] [--push]
                                generate a random ASCII key
   delete <keyname>             delete a key from Keyport
   kek generate                 generate a KEK
 '@ | Write-Output
+}
+
+function Show-CommandHelp([string]$Command, [string]$Subcommand) {
+    $usage = @{
+        list = 'list'
+        get = 'get <keyname>'
+        push = 'push [<keyname>]'
+        create = 'create <keyname> [--length N] [--push]'
+        delete = 'delete <keyname>'
+        kek = 'kek generate'
+    }
+    if (-not $usage.ContainsKey($Command)) { Fail "unknown command: $Command" }
+    if ($Command -eq 'kek' -and $Subcommand -and $Subcommand -notin @('generate','-h','--help')) {
+        Fail "unknown kek command: $Subcommand"
+    }
+    Write-Output "usage: keyport-client $($usage[$Command]) [-h]"
+    Write-Output ''
+    Write-Output 'options:'
+    Write-Output '  -h, --help    show this help message and exit'
+    if ($Command -eq 'create') {
+        Write-Output '  --length N    generated key length (16-1024; default 64)'
+        Write-Output '  --push        store the generated key in Keyport'
+    }
+    if ($Command -eq 'push') {
+        Write-Output ''
+        Write-Output 'Redirected stdin is read as bytes and requires a key name.'
+        Write-Output 'Without redirected stdin, prompt for a hidden password (UTF-8, no newline).'
+        Write-Output 'If keyname is omitted, prompt for the key name first.'
+    }
 }
 
 function Show-Version {
@@ -106,6 +135,11 @@ function Show-Version {
 
 if ($args.Count -eq 0 -or ($args.Count -eq 1 -and $args[0] -in @('-h','--help'))) { Show-Help; exit 0 }
 if ($args.Count -eq 1 -and $args[0] -in @('-v','--version')) { Show-Version; exit 0 }
+if ($args.Count -gt 1 -and ($args -contains '-h' -or $args -contains '--help')) {
+    Show-CommandHelp $args[0] $args[1]
+    exit 0
+}
+
 
 Add-Type -AssemblyName System.Net.Http
 
@@ -240,6 +274,46 @@ function Push-Value($Config,[string]$KeyName,[byte[]]$Plaintext) {
 }
 
 
+function Read-PasswordBytes {
+    $secret = Read-Host -Prompt 'Password' -AsSecureString
+    $pointer = [IntPtr]::Zero
+    try {
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
+        $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        if ($text.Length -eq 0) { throw 'password must not be empty' }
+        return ,([Text.Encoding]::UTF8.GetBytes($text))
+    } finally {
+        $text = $null
+        if ($pointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+        if ($secret) { $secret.Dispose() }
+    }
+}
+
+function Read-PushInput([string]$KeyName, [bool]$Redirected = [Console]::IsInputRedirected) {
+    if (-not $KeyName) {
+        if ($Redirected) { throw 'keyname is required when stdin is redirected' }
+        $KeyName = Read-Host -Prompt 'Key name'
+    }
+    Test-Name $KeyName 'key name'
+    if ($Redirected) {
+        $stdin = [Console]::OpenStandardInput()
+        $ms = New-Object IO.MemoryStream
+        try {
+            $buf = New-Object byte[] 4096
+            while (($n = $stdin.Read($buf, 0, $buf.Length)) -gt 0) {
+                $ms.Write($buf, 0, $n)
+                if ($ms.Length -gt $MaxPlaintextLength) { throw "plaintext exceeds maximum size ($MaxPlaintextLength bytes)" }
+            }
+            $bytes = $ms.ToArray()
+        } finally { $ms.Dispose() }
+    } else {
+        $bytes = Read-PasswordBytes
+    }
+    if ($bytes.Length -gt $MaxPlaintextLength) { throw "plaintext exceeds maximum size ($MaxPlaintextLength bytes)" }
+    return [PSCustomObject]@{ KeyName = $KeyName; Bytes = [byte[]]$bytes }
+}
+
+
 try {
     $command=$args[0]
     switch ($command) {
@@ -256,19 +330,13 @@ try {
             $names=@($obj.PSObject.Properties.Name); if($names.Count-ne 1 -or $names[0] -ne 'key' -or $obj.key -isnot [string]){throw 'server returned an unexpected response'}
             $plain=Unprotect-Value $config $args[1] $obj.key; $out=[Console]::OpenStandardOutput(); $out.Write($plain,0,$plain.Length); $out.Flush()
         }
-		'push' {
-			if($args.Count-ne 2){throw 'usage: keyport-client push <keyname>'}
-			$stdin=[Console]::OpenStandardInput()
-			$ms=New-Object IO.MemoryStream
-			$buf=New-Object byte[] 4096
-			while(($n=$stdin.Read($buf,0,$buf.Length))-gt 0){
-				$ms.Write($buf,0,$n)
-				if($ms.Length-gt $MaxPlaintextLength){
-					throw "plaintext exceeds maximum size ($MaxPlaintextLength bytes)"
-				}
-			}
-			Push-Value (Get-Config) $args[1] $ms.ToArray()
-		}
+        'push' {
+            if ($args.Count -gt 2) { throw 'usage: keyport-client push [<keyname>]' }
+            $config = Get-Config
+            $name = if ($args.Count -eq 2) { $args[1] } else { $null }
+            $inputValue = Read-PushInput $name
+            Push-Value $config $inputValue.KeyName $inputValue.Bytes
+        }
         'create' {
             if($args.Count-lt 2){throw 'usage: keyport-client create <keyname> [--length N] [--push]'}; $name=$args[1]; Test-Name $name 'key name'; $length=$CreateDefaultLength; $push=$false; $i=2
             while($i-lt $args.Count){if($args[$i]-eq '--push'){$push=$true;$i++}elseif($args[$i]-eq '--length' -and $i+1-lt $args.Count){$length=0;if(-not [int]::TryParse($args[$i+1],[ref]$length)){throw 'invalid length'};$i+=2}else{throw "unknown argument: $($args[$i])"}}

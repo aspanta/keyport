@@ -410,6 +410,19 @@ removed by the next completed run. Never unlink an active lock manually.
 For the first upgrade from an older updater that does not install metadata,
 rerun the current client installer. It preserves the existing configuration.
 
+## Interactive push
+
+With no redirected stdin, `keyport-client push mykey` prompts for a hidden
+password. `keyport-client push` prompts for the key name first, then the password.
+The password is encoded as UTF-8 without adding a newline. Empty interactive
+passwords are rejected; the existing 3041-byte plaintext limit applies.
+Cancel with Ctrl+C. The KEK and API credential still come from the configuration.
+
+Pipes and redirected files continue to supply raw bytes and require a key name;
+no prompts are shown for redirected input. For binary or multiline values, use
+redirected input. `keyport-client push -h` and `keyport-client create -h` display
+help without reading input or configuration.
+
 ## Synology DSM installation
 
 The Linux installer also recognizes Synology DSM via the `os_name="DSM"` marker

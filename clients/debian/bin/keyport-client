@@ -4,6 +4,8 @@ import argparse
 import base64
 import binascii
 import json
+import getpass
+import warnings
 import os
 import re
 from pathlib import Path
@@ -463,24 +465,37 @@ def command_get(args):
     sys.stdout.buffer.flush()
 
 
-def command_push(args):
-    config = load_config()
-
-    plaintext = sys.stdin.buffer.read(
-        MAX_PLAINTEXT_LENGTH + 1
-    )
-
+def read_push_input(keyname):
+    interactive = sys.stdin.isatty()
+    if keyname is None:
+        if not interactive:
+            raise KeyportError("keyname is required when stdin is redirected")
+        print("Key name: ", end="", file=sys.stderr, flush=True)
+        keyname = sys.stdin.readline().rstrip("\r\n")
+    validate_name(keyname, "key name")
+    if interactive:
+        try:
+            # Never fall back to displaying a secret if terminal echo cannot be disabled.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                plaintext = getpass.getpass("Password: ").encode("utf-8")
+        except (EOFError, getpass.GetPassWarning) as exc:
+            raise KeyportError("cannot read password securely from terminal") from exc
+        if not plaintext:
+            raise KeyportError("password must not be empty")
+    else:
+        plaintext = sys.stdin.buffer.read(MAX_PLAINTEXT_LENGTH + 1)
     if len(plaintext) > MAX_PLAINTEXT_LENGTH:
         raise KeyportError(
-            "plaintext exceeds maximum size "
-            f"({MAX_PLAINTEXT_LENGTH} bytes)"
+            f"plaintext exceeds maximum size ({MAX_PLAINTEXT_LENGTH} bytes)"
         )
+    return keyname, plaintext
 
-    push_value(
-        config,
-        args.keyname,
-        plaintext,
-    )
+
+def command_push(args):
+    config = load_config()
+    keyname, plaintext = read_push_input(args.keyname)
+    push_value(config, keyname, plaintext)
 
 
 def command_create(args):
@@ -584,11 +599,12 @@ def build_parser():
 
     push_parser = commands.add_parser(
         "push",
-        help="encrypt stdin and store it in Keyport",
+        help="encrypt stdin or an interactively entered password and store it in Keyport",
     )
 
     push_parser.add_argument(
-        "keyname",
+        "keyname", nargs="?",
+        help="key name; prompted for when omitted in a terminal",
     )
 
     push_parser.set_defaults(
