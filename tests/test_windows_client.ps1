@@ -82,7 +82,8 @@ try {
         $p = [Diagnostics.Process]::Start($psi)
         try {
             $p.StandardInput.BaseStream.Write($bytes,0,$bytes.Length)
-            $p.StandardInput.Close()
+            # Close the binary pipe directly: flushing StreamWriter may append a UTF-8 BOM.
+            $p.StandardInput.BaseStream.Close()
             $stdout = $p.StandardOutput.ReadToEnd(); $stderr = $p.StandardError.ReadToEnd()
             Assert ($p.WaitForExit(15000)) 'pipe process timeout'
             if ($size -gt 3041) { Assert ($p.ExitCode -ne 0 -and $stderr.Contains('maximum size')) 'oversized pipe rejected' }
