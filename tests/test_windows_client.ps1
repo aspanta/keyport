@@ -79,7 +79,13 @@ try {
         $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        $p = [Diagnostics.Process]::Start($psi)
+        # Process creates an auto-flushing StreamWriter for stdin using Console.InputEncoding.
+        # Disable its UTF-8 preamble before creating the process, even for empty input.
+        $savedInputEncoding = [Console]::InputEncoding
+        try {
+            [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+            $p = [Diagnostics.Process]::Start($psi)
+        } finally { [Console]::InputEncoding = $savedInputEncoding }
         try {
             $p.StandardInput.BaseStream.Write($bytes,0,$bytes.Length)
             # Close the binary pipe directly: flushing StreamWriter may append a UTF-8 BOM.
