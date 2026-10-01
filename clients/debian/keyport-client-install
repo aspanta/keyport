@@ -136,145 +136,30 @@ if [[ -r /etc/os-release ]]; then
     if [[ "${ID:-}" == "debian" ]]; then
         PLATFORM="debian"
     fi
-fi
-
-if [[ -z "${PLATFORM}" ]] &&
-   [[ -r /etc/VERSION ]] &&
-   grep -q '^os_name="DSM"
-acquire_update_lock
-
-TMPDIR_KEYPORT="$(mktemp -d)"
-
-CLIENT_SOURCE="${TMPDIR_KEYPORT}/keyport-client"
-CONFIG_SOURCE="${TMPDIR_KEYPORT}/keyport-client.conf.example"
-UPDATE_SOURCE="${TMPDIR_KEYPORT}/keyport-client-update"
-
-
-COMMIT="$(curl -fsSL -H 'User-Agent: Keyport' "https://api.github.com/repos/aspanta/keyport/commits/main" |
-    python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')" \
-    || die "cannot resolve main to a commit"
-[[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || die "invalid commit returned by GitHub"
-
-BASE_URL="https://raw.githubusercontent.com/aspanta/keyport/${COMMIT}/clients/debian"
-CLIENT_URL="${BASE_URL}/bin/keyport-client"
-UPDATE_URL="${BASE_URL}/bin/keyport-client-update"
-CONFIG_URL="${BASE_URL}/keyport-client.conf.example"
-VERSION_SOURCE="${TMPDIR_KEYPORT}/VERSION"
-BUILD_SOURCE="${TMPDIR_KEYPORT}/build-info.json"
-curl -fsSL "https://raw.githubusercontent.com/aspanta/keyport/${COMMIT}/VERSION" -o "${VERSION_SOURCE}" \
-    || die "failed to download VERSION"
-
-python3 - "${VERSION_SOURCE}" "${COMMIT}" "${BUILD_SOURCE}" <<'PY_BUILD'
-import json, re, sys
-from pathlib import Path
-version = Path(sys.argv[1]).read_text(encoding="ascii").strip()
-if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
-    raise SystemExit("invalid VERSION")
-Path(sys.argv[3]).write_text(json.dumps({"version": version, "commit": sys.argv[2]}) + "\n", encoding="utf-8")
-PY_BUILD
-
-info "downloading Keyport client from main"
-
-curl -fsSL "${CLIENT_URL}" -o "${CLIENT_SOURCE}" \
-    || die "failed to download keyport-client"
-
-curl -fsSL "${CONFIG_URL}" -o "${CONFIG_SOURCE}" \
-    || die "failed to download keyport-client.conf.example"
-
-curl -fsSL "${UPDATE_URL}" -o "${UPDATE_SOURCE}" \
-    || die "failed to download keyport-client-update"
-
-info "validating downloaded files"
-
-python3 -m py_compile "${CLIENT_SOURCE}" \
-    || die "client validation failed"
-
-bash -n "${UPDATE_SOURCE}" \
-    || die "update script validation failed"
-
-python3 - <<'PY' \
-    || die "python cryptography package is not usable"
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-AESGCM.generate_key(bit_length=256)
-PY
-
-mkdir -p "${INSTALL_DIR}" "${BIN_DIR}"
-chmod 0755 "${INSTALL_DIR}" "${BIN_DIR}"
-
-if [[ ! -e "${CONFIG_FILE}" ]]; then
-    info "creating initial configuration"
-
-    install \
-        -o root \
-        -g root \
-        -m 0600 \
-        "${CONFIG_SOURCE}" \
-        "${CONFIG_FILE}"
-
-    CONFIG_CREATED=1
-else
-    info "preserving existing configuration"
-    CONFIG_CREATED=0
-fi
-
-install_client_files
-
-info "installation complete"
-
-if [[ "${CONFIG_CREATED}" -eq 1 ]]; then
-    echo
-    echo "Configuration:"
-    echo "  ${CONFIG_FILE}"
-    echo
-    echo "Configure KEYPORT_URL, KEYPORT_SCOPE, KEYPORT_API_KEY,"
-    echo "and KEYPORT_KEK_BASE64 before using the client."
-    echo
-    echo "The configuration was created with mode 0600"
-    echo "and is accessible only to root by default."
-fi
- /etc/VERSION; then
+elif [[ -r /etc/VERSION ]] && grep -q 'os_name="DSM"' /etc/VERSION; then
     PLATFORM="dsm"
 fi
 
-if [[ -z "${PLATFORM}" ]]; then
-    die "unsupported operating system"
+[[ -n "${PLATFORM}" ]] || die "unsupported operating system"
+
+if [[ "${PLATFORM}" == "debian" ]]; then
+    info "installing required packages"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        python3 \
+        python3-cryptography \
+        util-linux
+else
+    info "checking required packages"
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    command -v python3 >/dev/null 2>&1 || die "python3 is required"
+    command -v flock >/dev/null 2>&1 || die "flock is required"
+    python3 -c 'from cryptography.hazmat.primitives.ciphers.aead import AESGCM; AESGCM.generate_key(bit_length=256)' >/dev/null 2>&1 ||
+        die "python cryptography package is not usable"
 fi
-
-case "${PLATFORM}" in
-    debian)
-        info "installing required packages"
-
-        export DEBIAN_FRONTEND=noninteractive
-
-        apt-get update
-
-        apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            python3 \
-            python3-cryptography \
-            util-linux
-        ;;
-
-    dsm)
-        info "checking required packages"
-
-        command -v curl >/dev/null 2>&1 ||
-            die "curl is required"
-
-        command -v python3 >/dev/null 2>&1 ||
-            die "python3 is required"
-
-        command -v flock >/dev/null 2>&1 ||
-            die "flock is required"
-
-        python3 - <<'PY_DSM' ||
-            die "python cryptography package is not usable"
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-AESGCM.generate_key(bit_length=256)
-PY_DSM
-        ;;
-esac
 
 acquire_update_lock
 
