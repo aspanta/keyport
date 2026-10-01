@@ -131,13 +131,13 @@ fi
 
 PLATFORM=""
 
-if [[ -r /etc/os-release ]]; then
+if [[ -r /etc/VERSION ]] && grep -q 'os_name="DSM"' /etc/VERSION; then
+    PLATFORM="dsm"
+elif [[ -r /etc/os-release ]]; then
     . /etc/os-release
     if [[ "${ID:-}" == "debian" ]]; then
         PLATFORM="debian"
     fi
-elif [[ -r /etc/VERSION ]] && grep -q 'os_name="DSM"' /etc/VERSION; then
-    PLATFORM="dsm"
 fi
 
 [[ -n "${PLATFORM}" ]] || die "unsupported operating system"
