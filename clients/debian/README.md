@@ -409,3 +409,19 @@ removed by the next completed run. Never unlink an active lock manually.
 
 For the first upgrade from an older updater that does not install metadata,
 rerun the current client installer. It preserves the existing configuration.
+
+## Synology DSM installation
+
+The Linux installer also recognizes Synology DSM via the `os_name="DSM"` marker
+in `/etc/VERSION`, even when `/etc/os-release` exists. DSM detection takes
+precedence; Debian package installation is never attempted on a recognized DSM
+host. Other operating systems are rejected.
+
+On DSM, run the installer as root with Bash. Provision `curl`, `python3`, `flock`
+and Python's `cryptography` package for that interpreter beforehand. The installer
+checks these dependencies instead of invoking `apt-get`. The existing installation
+paths, configuration, client and updater are reused.
+
+Automated platform tests use simulated OS metadata. They do not validate DSM's
+actual utilities, filesystem permissions or package setup. Verify installation
+and updating on the target NAS before relying on this support in production.
