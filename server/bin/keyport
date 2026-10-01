@@ -575,6 +575,31 @@ def cmd_credential_delete(args):
         print(f"Credential absent: {credential_id}")
 
 
+def cmd_audit(args):
+    name = validate_scope_name(args.scope)
+    with get_db() as db:
+        scope = require_scope(db, name)
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, created_at, source, method, keyname, result
+                FROM audit
+                WHERE scope_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1000
+                """,
+                (scope["id"],),
+            )
+            rows = cursor.fetchall()
+    print(f"{'ID':<12} {'TIME':<19} {'SOURCE':<45} {'METHOD':<8} {'KEY':<64} RESULT")
+    for row in rows:
+        print(
+            f"{row['id']:<12} {str(row['created_at']):<19} "
+            f"{row['source']:<45} {row['method']:<8} "
+            f"{row['keyname'] or '-':<64} {row['result']}"
+        )
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="keyport",
@@ -587,6 +612,10 @@ def build_parser():
     )
 
     top = parser.add_subparsers(dest="command", required=True)
+
+    audit = top.add_parser("audit", help="show the latest 1000 audit records for a scope")
+    audit.add_argument("scope")
+    audit.set_defaults(func=cmd_audit)
 
     scope = top.add_parser("scope")
     scope_sub = scope.add_subparsers(
