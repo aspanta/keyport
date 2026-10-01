@@ -43,41 +43,46 @@ service.
 ## Repository layout
 
 ```text
-server/
-├── app/
-│   └── app.py
-├── bin/
-│   ├── keyport
-│   └── keyport-update
-├── config/
-├── sql/
-│   ├── migrations/
-│   └── schema.sql
-
-clients/
-├── debian/
+keyport/
+├── .github/
+│   └── workflows/
+│       └── tests.yml
+├── server/
+│   ├── app/
+│   │   └── app.py
 │   ├── bin/
-│   │   ├── keyport-client
-│   │   └── keyport-client-update
-│   ├── keyport-client-install
-│   ├── keyport-client.conf.example
-│   └── README.md
-└── windows/
-    ├── bin/
-    │   ├── keyport-client.cmd
-    │   ├── keyport-client.ps1
-    │   ├── keyport-client-update.cmd
-    │   └── keyport-client-update.ps1
-    ├── keyport-client-install.ps1
-    ├── keyport-client.conf.example
-    └── README.md
-
-docs/
-├── api.md
-├── architecture.md
-├── cli.md
-├── installation.md
-└── security.md
+│   │   ├── keyport
+│   │   └── keyport-update
+│   ├── config/
+│   └── sql/
+│       ├── migrations/
+│       └── schema.sql
+├── clients/
+│   ├── debian/
+│   │   ├── bin/
+│   │   │   ├── keyport-client
+│   │   │   └── keyport-client-update
+│   │   ├── keyport-client-install
+│   │   ├── keyport-client.conf.example
+│   │   └── README.md
+│   └── windows/
+│       ├── bin/
+│       │   ├── keyport-client.cmd
+│       │   ├── keyport-client.ps1
+│       │   ├── keyport-client-update.cmd
+│       │   └── keyport-client-update.ps1
+│       ├── keyport-client-install.ps1
+│       ├── keyport-client.conf.example
+│       └── README.md
+├── docs/
+│   ├── api.md
+│   ├── architecture.md
+│   ├── cli.md
+│   ├── installation.md
+│   └── security.md
+├── tests/
+├── VERSION
+└── README.md
 ```
 
 ## Server

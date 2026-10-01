@@ -129,28 +129,37 @@ if [[ "${EUID}" -ne 0 ]]; then
     die "must be run as root"
 fi
 
-if [[ ! -r /etc/os-release ]]; then
-    die "cannot determine operating system"
+PLATFORM=""
+
+if [[ -r /etc/VERSION ]] && grep -q 'os_name="DSM"' /etc/VERSION; then
+    PLATFORM="dsm"
+elif [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+    if [[ "${ID:-}" == "debian" ]]; then
+        PLATFORM="debian"
+    fi
 fi
 
-. /etc/os-release
+[[ -n "${PLATFORM}" ]] || die "unsupported operating system"
 
-if [[ "${ID:-}" != "debian" ]]; then
-    die "this installer supports Debian only"
+if [[ "${PLATFORM}" == "debian" ]]; then
+    info "installing required packages"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        python3 \
+        python3-cryptography \
+        util-linux
+else
+    info "checking required packages"
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    command -v python3 >/dev/null 2>&1 || die "python3 is required"
+    command -v flock >/dev/null 2>&1 || die "flock is required"
+    python3 -c 'from cryptography.hazmat.primitives.ciphers.aead import AESGCM; AESGCM.generate_key(bit_length=256)' >/dev/null 2>&1 ||
+        die "python cryptography package is not usable"
 fi
-
-info "installing required packages"
-
-export DEBIAN_FRONTEND=noninteractive
-
-apt-get update
-
-apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    python3 \
-    python3-cryptography \
-    util-linux
 
 acquire_update_lock
 
