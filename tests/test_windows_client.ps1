@@ -86,7 +86,7 @@ try {
             $stdout = $p.StandardOutput.ReadToEnd(); $stderr = $p.StandardError.ReadToEnd()
             Assert ($p.WaitForExit(15000)) 'pipe process timeout'
             if ($size -gt 3041) { Assert ($p.ExitCode -ne 0 -and $stderr.Contains('maximum size')) 'oversized pipe rejected' }
-            else { Assert ($p.ExitCode -eq 0 -and $stdout -ceq [Convert]::ToBase64String($bytes)) 'pipe bytes preserved' }
+            else { Assert ($p.ExitCode -eq 0 -and $stdout -ceq [Convert]::ToBase64String($bytes)) "pipe bytes preserved: size=$size exit=$($p.ExitCode) stdout=[$stdout] stderr=[$stderr]" }
         } finally { if (-not $p.HasExited) { $p.Kill() }; $p.Dispose() }
     }
     Write-Output 'PASS redirected byte input and maximum size'
