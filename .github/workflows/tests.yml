@@ -12,8 +12,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Legacy Linux downloads
-        run: python scripts/sync-linux-compat.py --check
       - run: python -m pip install -r tests/requirements.txt
       - run: python -m pytest -q tests/test_api.py tests/test_server_update.py tests/test_version.py tests/test_linux_update.py tests/test_client_input_audit.py
       - name: Installer platform detection

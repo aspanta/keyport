@@ -42,6 +42,5 @@ work and while the first is paused after unlinking `.update.lock`. They verify
 that the second process is rejected, stale files are reused, legacy file locks
 are respected, and success/failure/signal paths remove only the owner's file.
 
-Linux migration tests exercise the old Debian download URLs, migration to the
-Linux path, rollback, and the legacy installer entry point. Run
-`python3 scripts/sync-linux-compat.py --check` to verify compatibility downloads.
+Linux installer tests cover Debian-family detection, existing dependencies,
+package installation and failures without changing host packages.

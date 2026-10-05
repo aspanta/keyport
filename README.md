@@ -58,7 +58,6 @@ keyport/
 │       ├── migrations/
 │       └── schema.sql
 ├── clients/
-│   ├── debian/                 # generated compatibility downloads
 │   ├── linux/
 │   │   ├── bin/
 │   │   │   ├── keyport-client
@@ -81,8 +80,6 @@ keyport/
 │   ├── cli.md
 │   ├── installation.md
 │   └── security.md
-├── scripts/
-│   └── sync-linux-compat.py
 ├── tests/
 ├── VERSION
 └── README.md
@@ -208,7 +205,7 @@ keyport-client delete mykey
 
 Installation and platform-specific configuration are documented separately:
 
-- [Linux client (Debian and DSM)](clients/linux/README.md)
+- [Linux client (Debian-based OS and DSM)](clients/linux/README.md)
 - [Windows client](clients/windows/README.md)
 
 ## Administration
@@ -260,7 +257,7 @@ Practical deployment and integration guides are available in [howto/](howto/).
 - [Administration CLI](docs/cli.md)
 - [Server installation and updating](docs/installation.md)
 - [Security](docs/security.md)
-- [Linux client (Debian and DSM)](clients/linux/README.md)
+- [Linux client (Debian-based OS and DSM)](clients/linux/README.md)
 
 ## License
 
