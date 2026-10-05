@@ -455,11 +455,3 @@ installation fails. DSM dependencies must still be provisioned beforehand.
 
 Ubuntu and other derivatives are covered by simulated platform and dependency
 tests; they have not all been tested on real systems.
-
-## Download paths in 1.5.0
-
-Only `clients/linux/` is maintained. Legacy `clients/debian/` downloads and their
-generation script have been removed now that existing installations have been
-updated. Commands and `/opt/keyport-client` remain unchanged. Any older updater
-still using Debian URLs must be replaced by running the current Linux installer;
-existing configuration is preserved.
