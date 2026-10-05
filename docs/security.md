@@ -8,7 +8,7 @@ Keyport is not intended to make a compromised client safe, nor can guest-OS hard
 
 ## Client-side encryption
 
-The reference Debian client encrypts and decrypts key material locally using
+The reference Linux client encrypts and decrypts key material locally using
 AES-256-GCM with a 256-bit Key Encryption Key (KEK).
 
 A fresh 12-byte random nonce is generated for every encryption operation. The
@@ -34,7 +34,7 @@ resulting string as opaque data. The KEK remains on the client and is never
 sent to Keyport.
 
 The server accepts opaque values up to 4096 ASCII characters. With the current
-`v1` encoding, the reference Debian client therefore limits plaintext input to
+`v1` encoding, the reference Linux client therefore limits plaintext input to
 3041 bytes.
 
 The `push` and `get` operations are binary-safe. Decrypted data is returned

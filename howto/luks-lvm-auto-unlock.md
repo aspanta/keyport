@@ -36,7 +36,7 @@ The target must be the intended empty device and must not be mounted or in use b
 ## 2. Install and configure Keyport
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/clients/debian/keyport-client-install | bash
+curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/clients/linux/keyport-client-install | bash
 keyport-client -v
 ```
 

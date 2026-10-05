@@ -86,7 +86,7 @@ def installation(tmp_path):
 
 def prepare_runner(installation, installer=False):
     root, install, env = installation
-    path = 'clients/debian/keyport-client-install' if installer else 'clients/debian/bin/keyport-client-update'
+    path = 'clients/linux/keyport-client-install' if installer else 'clients/linux/bin/keyport-client-update'
     code = (ROOT / path).read_text().replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links'))
     code = code.replace('/etc/os-release', str(root / 'os-release')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then')
     runner = root / 'runner'
@@ -182,3 +182,47 @@ def test_parallel_operations_during_work_and_lock_removal(installation, mode, in
         output, errors = first.communicate(timeout=30)
     assert first.returncode == 0, output + errors
     assert not (install / '.update.lock').exists()
+
+
+@pytest.mark.parametrize('mode', ['', 'after2'])
+def test_old_download_path_migration_and_rollback(installation, mode):
+    root, install, env = installation
+    # The pre-migration updater differs only in its download base URL.
+    old = (ROOT / 'clients/linux/bin/keyport-client-update').read_text().replace('/clients/linux', '/clients/debian')
+    (install / 'bin/keyport-client-update').write_text(old)
+    runner = root / 'old-runner'
+    runner.write_text(old.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then'))
+    result = subprocess.run(['bash', str(runner)], env=dict(env, CLIENT_TEST_MODE=mode), capture_output=True, text=True, timeout=30)
+    urls = (root / 'urls').read_text().splitlines()
+    assert any('/clients/debian/bin/keyport-client-update' in u for u in urls)
+    if mode:
+        assert result.returncode != 0
+        assert (install / 'bin/keyport-client-update').read_text() == old
+        assert json.loads((install / 'build-info.json').read_text())['commit'] == 'b' * 40
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        replacement = (install / 'bin/keyport-client-update').read_text()
+        assert '/clients/linux' in replacement
+        assert '/clients/debian' not in replacement
+        (root / 'urls').unlink()
+        # Run the newly installed updater itself for the next update.
+        runner.write_text(replacement.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then'))
+        result = subprocess.run(['bash', str(runner)], env=env, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        urls = (root / 'urls').read_text()
+        assert '/clients/linux/bin/keyport-client-update' in urls
+        assert '/clients/debian' not in urls
+    assert (install / 'keyport-client.conf').read_text() == 'preserve-config'
+    assert not (install / '.update.lock').exists()
+
+
+def test_legacy_installer_downloads_linux_files(installation):
+    root, install, env = installation
+    code = (ROOT / 'clients/debian/keyport-client-install').read_text()
+    code = code.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links'))
+    code = code.replace('/etc/os-release', str(root / 'os-release')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then')
+    runner = root / 'legacy-installer'; runner.write_text(code)
+    result = subprocess.run(['bash', str(runner)], env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '/clients/linux/bin/keyport-client' in (root / 'urls').read_text()
+    assert (install / 'keyport-client.conf').read_text() == 'preserve-config'

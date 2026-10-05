@@ -190,4 +190,4 @@ environment, systemd, nginx, Fail2ban, or TLS configuration.
 
 ## Client interoperability
 
-The Debian and Windows clients use the same AES-256-GCM encrypted value format and `scope/keyname` AAD. With the same scope and KEK, either client can decrypt values written by the other.
+The Linux and Windows clients use the same AES-256-GCM encrypted value format and `scope/keyname` AAD. With the same scope and KEK, either client can decrypt values written by the other.

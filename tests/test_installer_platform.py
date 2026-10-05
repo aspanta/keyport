@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-INSTALLER = Path(__file__).resolve().parents[1] / 'clients/debian/keyport-client-install'
+INSTALLER = Path(__file__).resolve().parents[1] / 'clients/linux/keyport-client-install'
 
 
 @pytest.mark.parametrize('release,version,expected', [

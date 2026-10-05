@@ -12,15 +12,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Legacy Linux downloads
+        run: python scripts/sync-linux-compat.py --check
       - run: python -m pip install -r tests/requirements.txt
-      - run: python -m pytest -q tests/test_api.py tests/test_server_update.py tests/test_version.py tests/test_debian_update.py tests/test_client_input_audit.py
+      - run: python -m pytest -q tests/test_api.py tests/test_server_update.py tests/test_version.py tests/test_linux_update.py tests/test_client_input_audit.py
       - name: Installer platform detection
         run: python -m pytest -q tests/test_installer_platform.py
       - name: Shell syntax
         run: |
           bash -n server/bin/keyport-update
-          bash -n clients/debian/keyport-client-install
-          bash -n clients/debian/bin/keyport-client-update
+          bash -n clients/linux/keyport-client-install
+          bash -n clients/linux/bin/keyport-client-update
       - name: Fail2ban filter
         run: |
           sudo apt-get update
