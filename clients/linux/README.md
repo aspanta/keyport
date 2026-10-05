@@ -8,8 +8,8 @@ remains on the client and is never sent to Keyport.
 
 ## Requirements
 
-- Supported platform: Debian or Synology DSM
-- Python 3
+- Debian-based Linux (including Ubuntu and derivatives declaring Debian/Ubuntu ancestry in `ID_LIKE`), or Synology DSM
+- Python 3.7 or newer
 - Python `cryptography` package
 - A configured Keyport scope and API credential
 
@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/aspanta/keyport/main/clients/linux/
 
 The installer:
 
-- installs dependencies on Debian or checks preinstalled dependencies on DSM;
+- checks dependencies, installs missing dependencies through `apt-get` on Debian-based systems, and validates preinstalled dependencies on DSM;
 - downloads the current client and updater from the Keyport repository;
 - validates the downloaded files before installation;
 - installs the client under `/opt/keyport-client`;
@@ -428,26 +428,30 @@ help without reading input or configuration.
 The Linux installer also recognizes Synology DSM via the `os_name="DSM"` marker
 in `/etc/VERSION`, even when `/etc/os-release` exists. DSM detection takes
 precedence; Debian package installation is never attempted on a recognized DSM
-host. Other operating systems are rejected.
+host. Debian-based systems are recognized by `ID=debian`, `ID=ubuntu`, or a
+`debian`/`ubuntu` token in `ID_LIKE` in `/etc/os-release`. Other OS families are rejected.
 
 On DSM, run the installer as root with Bash. Provision `curl`, `python3`, `flock`
 and Python's `cryptography` package for that interpreter beforehand. The installer
 checks these dependencies instead of invoking `apt-get`. The existing installation
 paths, configuration, client and updater are reused.
 
-Debian and DSM are supported platforms. DSM operation has been verified on a real
+Debian, Debian-based Linux and DSM are supported by the installer. DSM operation has been verified on a real
 NAS by the project maintainer. Automated platform tests use simulated OS metadata;
 they do not replace device testing of DSM utilities or package setup.
 
-## Legacy download paths
+## Debian-based dependency handling
 
-`clients/linux/` is the canonical source for the Linux client, installer and
-updater. Existing `clients/debian/` download URLs remain available for older
-installations. These compatibility files are generated from the Linux sources
-by `python3 scripts/sync-linux-compat.py`; CI checks that they are synchronized.
-After an old updater downloads the current compatibility files, subsequent
-updates use `clients/linux/`. Commands, `/opt/keyport-client`, configuration,
-version metadata and rollback behavior are unchanged.
+The installer accepts Debian, Ubuntu and derivatives whose `/etc/os-release`
+declares `debian` or `ubuntu` ancestry in `ID_LIKE`. If Bash, core utilities,
+`grep`, `curl`, `flock`, Python
+3.7+, AESGCM from Python `cryptography`, and a usable CA trust store are already
+available, no package manager is needed. Otherwise, it uses `apt-get` to install
+`bash`, `coreutils`, `grep`, `ca-certificates`, `curl`, `python3`,
+`python3-cryptography` and `util-linux`.
+It checks the active interpreter and trust store again afterwards and stops
+before modifying the installation if dependencies remain unusable or package
+installation fails. DSM dependencies must still be provisioned beforehand.
 
-Other Linux distributions are not yet supported by the installer. Add platform
-specific dependency handling to the shared installer instead of copying the client.
+Ubuntu and other derivatives are covered by simulated platform and dependency
+tests; they have not all been tested on real systems.

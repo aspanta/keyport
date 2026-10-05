@@ -129,37 +129,74 @@ if [[ "${EUID}" -ne 0 ]]; then
     die "must be run as root"
 fi
 
+dependencies_ready() {
+    local tool
+    for tool in bash curl python3 flock mktemp install cp mv mkdir chmod ln rm touch grep; do
+        command -v "${tool}" >/dev/null 2>&1 || return 1
+    done
+    python3 - <<'PY_DEPS' >/dev/null 2>&1
+import ssl
+import sys
+import re
+from pathlib import Path
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+if sys.version_info < (3, 7):
+    raise SystemExit("Python 3.7 or newer is required")
+AESGCM.generate_key(bit_length=256)
+context = ssl.create_default_context()
+paths = ssl.get_default_verify_paths()
+# OpenSSL loads hashed CA directories lazily; an empty in-memory store alone
+# does not mean a configured certificate directory is unusable.
+capath = Path(paths.capath) if paths.capath else None
+hashed_cas = capath and capath.is_dir() and any(
+    re.fullmatch(r"[0-9a-fA-F]{8}\.[0-9]+", entry.name) and entry.is_file()
+    for entry in capath.iterdir()
+)
+if not context.get_ca_certs() and not hashed_cas:
+    raise SystemExit("no trusted CA certificates available")
+PY_DEPS
+}
+
 PLATFORM=""
 
 if [[ -r /etc/VERSION ]] && grep -q 'os_name="DSM"' /etc/VERSION; then
     PLATFORM="dsm"
 elif [[ -r /etc/os-release ]]; then
+    ID=""
+    ID_LIKE=""
     . /etc/os-release
-    if [[ "${ID:-}" == "debian" ]]; then
-        PLATFORM="debian"
-    fi
+    case "${ID}" in
+        debian|ubuntu) PLATFORM="debian" ;;
+        *)
+            for base in ${ID_LIKE}; do
+                case "${base}" in
+                    debian|ubuntu) PLATFORM="debian"; break ;;
+                esac
+            done
+            ;;
+    esac
 fi
 
-[[ -n "${PLATFORM}" ]] || die "unsupported operating system"
+[[ -n "${PLATFORM}" ]] || die "unsupported operating system: expected Debian-based Linux or DSM"
 
 if [[ "${PLATFORM}" == "debian" ]]; then
-    info "installing required packages"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        python3 \
-        python3-cryptography \
-        util-linux
+    if ! dependencies_ready; then
+        command -v apt-get >/dev/null 2>&1 ||
+            die "missing dependencies and apt-get is unavailable; install bash, coreutils, grep, ca-certificates, curl, python3, python3-cryptography and util-linux"
+        info "installing required packages"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update || die "failed to update package indexes"
+        apt-get install -y --no-install-recommends \
+            bash coreutils grep ca-certificates curl python3 python3-cryptography util-linux ||
+            die "failed to install required packages"
+    fi
 else
     info "checking required packages"
-    command -v curl >/dev/null 2>&1 || die "curl is required"
-    command -v python3 >/dev/null 2>&1 || die "python3 is required"
-    command -v flock >/dev/null 2>&1 || die "flock is required"
-    python3 -c 'from cryptography.hazmat.primitives.ciphers.aead import AESGCM; AESGCM.generate_key(bit_length=256)' >/dev/null 2>&1 ||
-        die "python cryptography package is not usable"
 fi
+
+# Validate the active interpreter and trust store after any package installation.
+dependencies_ready ||
+    die "dependencies are not usable: require Bash, core utilities, grep, curl, flock, Python 3.7+, Python cryptography (AESGCM) and trusted CA certificates"
 
 acquire_update_lock
 
