@@ -244,6 +244,12 @@ encrypted data.
 
 See [Security](docs/security.md).
 
+## How-to guides
+
+Practical deployment and integration guides are available in [howto/](howto/).
+
+- [LUKS2 + LVM Auto-Unlock with Keyport](howto/luks-lvm-auto-unlock.md)
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
