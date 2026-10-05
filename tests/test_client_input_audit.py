@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def client():
-    return runpy.run_path(str(ROOT / 'clients/debian/bin/keyport-client'))
+    return runpy.run_path(str(ROOT / 'clients/linux/bin/keyport-client'))
 
 
 class Terminal(io.StringIO):

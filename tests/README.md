@@ -37,7 +37,11 @@ checks reject a responding service with a different version or SHA. Windows
 checks use a second process to verify lock exclusion, automatic deletion, and
 reuse of stale lock files from older installations.
 
-Debian lock checks run two real updater/installer processes, both during normal
+Linux lock checks run two real updater/installer processes, both during normal
 work and while the first is paused after unlinking `.update.lock`. They verify
 that the second process is rejected, stale files are reused, legacy file locks
 are respected, and success/failure/signal paths remove only the owner's file.
+
+Linux migration tests exercise the old Debian download URLs, migration to the
+Linux path, rollback, and the legacy installer entry point. Run
+`python3 scripts/sync-linux-compat.py --check` to verify compatibility downloads.

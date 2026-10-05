@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PROGRAMS = [
     ('server/bin/keyport', 'app', False),
     ('server/bin/keyport-update', 'app', True),
-    ('clients/debian/bin/keyport-client', '.', False),
-    ('clients/debian/bin/keyport-client-update', '.', True),
+    ('clients/linux/bin/keyport-client', '.', False),
+    ('clients/linux/bin/keyport-client-update', '.', True),
 ]
 
 

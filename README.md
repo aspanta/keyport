@@ -58,7 +58,8 @@ keyport/
 │       ├── migrations/
 │       └── schema.sql
 ├── clients/
-│   ├── debian/
+│   ├── debian/                 # generated compatibility downloads
+│   ├── linux/
 │   │   ├── bin/
 │   │   │   ├── keyport-client
 │   │   │   └── keyport-client-update
@@ -80,6 +81,8 @@ keyport/
 │   ├── cli.md
 │   ├── installation.md
 │   └── security.md
+├── scripts/
+│   └── sync-linux-compat.py
 ├── tests/
 ├── VERSION
 └── README.md
@@ -158,7 +161,7 @@ See [Server installation and updating](docs/installation.md).
 
 ## Clients
 
-The Debian and Windows clients encrypt and decrypt key material locally using
+The Linux and Windows clients encrypt and decrypt key material locally using
 AES-256-GCM and use the same encrypted value format.
 
 The client provides:
@@ -205,7 +208,7 @@ keyport-client delete mykey
 
 Installation and platform-specific configuration are documented separately:
 
-- [Debian client](clients/debian/README.md)
+- [Linux client (Debian and DSM)](clients/linux/README.md)
 - [Windows client](clients/windows/README.md)
 
 ## Administration
@@ -257,7 +260,7 @@ Practical deployment and integration guides are available in [howto/](howto/).
 - [Administration CLI](docs/cli.md)
 - [Server installation and updating](docs/installation.md)
 - [Security](docs/security.md)
-- [Debian client](clients/debian/README.md)
+- [Linux client (Debian and DSM)](clients/linux/README.md)
 
 ## License
 
@@ -269,7 +272,7 @@ details.
 ## Installed version
 
 All CLI commands support `-h` / `--help` and `-v` / `--version`, including both
-updaters and the Debian/Windows clients. The server's `/health` and local
+updaters and the Linux/Windows clients. The server's `/health` and local
 `/ready` responses also include `version` and `commit`.
 
 The release comes from `VERSION`. Installers/updaters pin downloads to one

@@ -1,7 +1,7 @@
 # Keyport Client for Windows
 
 The Keyport Windows client provides the same Keyport operations and encrypted
-value format as the Debian client. Encryption and decryption are performed
+value format as the Linux client. Encryption and decryption are performed
 locally and the KEK is never sent to the server.
 
 ## Requirements
@@ -120,7 +120,7 @@ keyport-client
 ```
 
 `push` reads bytes from standard input and `get` writes decrypted bytes to
-standard output. The Windows and Debian clients use the same AES-256-GCM
+standard output. The Windows and Linux clients use the same AES-256-GCM
 format (`v1:<base64(nonce || ciphertext || tag)>`) and AAD (`scope/keyname`),
 so values written by either client can be decrypted by the other when they use
 the same scope and KEK.
