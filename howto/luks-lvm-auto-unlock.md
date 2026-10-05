@@ -252,7 +252,7 @@ blkid -s UUID -o value /dev/secure/data
 Add:
 
 ```fstab
-UUID=<FS-UUID> /mnt/data ext4 defaults,x-systemd.requires=keyport-luks-unlock.service,x-systemd.after=keyport-luks-unlock.service 0 2
+UUID=<FS-UUID> /mnt/data ext4 defaults,nofail,x-systemd.requires=keyport-luks-unlock.service,x-systemd.after=keyport-luks-unlock.service 0 2
 ```
 
 These options instruct the systemd fstab generator to add requirement and ordering dependencies when the corresponding mount unit is generated. The generated mount-unit configuration has **not** been refreshed yet.
