@@ -191,7 +191,7 @@ def test_old_download_path_migration_and_rollback(installation, mode):
     old = (ROOT / 'clients/linux/bin/keyport-client-update').read_text().replace('/clients/linux', '/clients/debian')
     (install / 'bin/keyport-client-update').write_text(old)
     runner = root / 'old-runner'
-    runner.write_text(old.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')))
+    runner.write_text(old.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then'))
     result = subprocess.run(['bash', str(runner)], env=dict(env, CLIENT_TEST_MODE=mode), capture_output=True, text=True, timeout=30)
     urls = (root / 'urls').read_text().splitlines()
     assert any('/clients/debian/bin/keyport-client-update' in u for u in urls)
@@ -206,7 +206,7 @@ def test_old_download_path_migration_and_rollback(installation, mode):
         assert '/clients/debian' not in replacement
         (root / 'urls').unlink()
         # Run the newly installed updater itself for the next update.
-        runner.write_text(replacement.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')))
+        runner.write_text(replacement.replace('/opt/keyport-client', str(install)).replace('/usr/local/sbin', str(root / 'links')).replace('if [[ "${EUID}" -ne 0 ]]; then', 'if false; then'))
         result = subprocess.run(['bash', str(runner)], env=env, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, result.stdout + result.stderr
         urls = (root / 'urls').read_text()
